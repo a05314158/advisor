@@ -162,3 +162,15 @@ class RecommendationsAPI(unittest.TestCase):
         self.assertEqual(self.request(scope='mine').json()['top3'][0]['cashbackKopecks'], 5000)
         import_catalog(self.path, [named])
         self.assertEqual(self.request().json(), published)
+
+    def test_recommendation_links_only_known_banks(self):
+        self.assertTrue(all('bankAccess' not in card for card in self.request().json()['top3']))
+        for label, name, rate in [('Т‑Банк', 'Первая', 900), ('АЛЬФА БАНК', 'Вторая', 700),
+                                  ('Т-Банк другой', 'Третья', 500)]:
+            response = self.client.post('/api/me/manual-cards', json={'name':name,'bankName':label,
+                'rules':[{'categoryName':'Супермаркеты','rateBps':rate}]})
+            self.assertEqual(response.status_code, 201)
+        first, second, third = self.request(scope='mine').json()['top3']
+        self.assertEqual(first['bankAccess']['webUrl'], 'https://www.tbank.ru/login/')
+        self.assertEqual(second['bankAccess']['webUrl'], 'https://web.alfabank.ru/')
+        self.assertNotIn('bankAccess', third)

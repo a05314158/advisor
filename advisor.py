@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from catalog import CATEGORIES, CATEGORY_GROUPS, SEED, connect, initialize, rows
 from accounts import account, mount_accounts
+from bank_links import bank_access
 from observability import mount_observability
 from spending import mount_spending
 PAGE = Path(__file__).with_name('index.html')
@@ -51,6 +52,9 @@ def recommend(category: str, amount: int, day: date, rules=None, own=None, *, ca
     seen = set()
     for match in matches:
         if match['cardId'] not in seen:
+            access = bank_access(match['bankName'])
+            if access is not None:
+                match['bankAccess'] = access
             ranked.append(match)
             seen.add(match['cardId'])
     version = rules_version(rules) if catalog_version is None else catalog_version
