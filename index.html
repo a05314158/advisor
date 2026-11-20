@@ -850,7 +850,7 @@ $('purchase-date').value = $('purchase-date').max = utcToday;
 $('spending-month').value = $('spending-month').max = utcToday.slice(0, 7);
 let reportVersion = 0;
 
-async function loadSpending() {
+async function loadSpending(openHistory = false) {
   const current = ++reportVersion, month = $('spending-month').value;
   const target = $('spending-report'), status = $('spending-status');
   target.replaceChildren();
@@ -864,6 +864,8 @@ async function loadSpending() {
     const largest = report.largestPurchase;
     target.append(element('h3', 'Всего: ' + money(report.totalKopecks)),
       element('p', `Покупок: ${report.count}. Крупнейшая: ${money(largest.amountKopecks)} — ${largest.merchant || largest.categoryName}, ${largest.date}.`));
+    target.append(element('p', 'Начислено по введённым данным: ' + money(report.actualCashbackKopecks) +
+      ' · заполнено покупок: ' + report.actualCashbackCount + ' из ' + report.count));
     for (const [title, items, amount] of [
       ['Расходы по категориям', report.byCategory, 'amountKopecks'],
       ['Расходы по магазинам', report.byMerchant, 'amountKopecks'],
@@ -879,6 +881,7 @@ async function loadSpending() {
       target.append(section);
     }
     const history = element('details', '', 'panel');
+    history.open = openHistory === true;
     history.append(element('summary', 'Журнал покупок'), element('small',
       'Сравнение для каждой покупки отдельно, по сохранённым условиям. Месячный остаток не учитывается.'));
     for (const purchase of report.purchases) {
@@ -898,6 +901,35 @@ async function loadSpending() {
       } else if (differenceKopecks === 0) {
         row.append(element('p', 'Использованная карта дала бы максимальный возврат.'));
       }
+      const form = element('form', '', 'stack');
+      const label = element('label', 'Фактически начислено, ₽');
+      const input = element('input');
+      input.inputMode = 'decimal';
+      input.value = purchase.actualCashbackKopecks === null ? '' : String(purchase.actualCashbackKopecks / 100);
+      input.placeholder = 'Пусто — неизвестно';
+      label.append(input);
+      const save = element('button', 'Сохранить начисление', 'secondary');
+      const message = element('p');
+      message.setAttribute('role', 'status');
+      form.append(label, save, message);
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const amountKopecks = optionalAmount(input);
+        if (Number.isNaN(amountKopecks)) {
+          message.textContent = 'Введите сумму от нуля до 10 млрд ₽.';
+          return;
+        }
+        save.disabled = true;
+        try {
+          await api('/api/me/purchases/' + encodeURIComponent(purchase.id) + '/cashback',
+            {method:'PUT', body:{amountKopecks}});
+          await loadSpending(true);
+        } catch {
+          message.textContent = 'Не удалось сохранить начисление.';
+          save.disabled = false;
+        }
+      };
+      row.append(form);
       const remove = element('button', 'Удалить', 'secondary');
       remove.type = 'button';
       remove.onclick = async () => {

@@ -25,12 +25,12 @@ def compare_purchase(card, estimates):
 def summarize(month, records):
     purchases, totals, caps = [], {}, {}
     groups = {'byCategory': {}, 'byMerchant': {}, 'byUsedCard': {}}
-    for id_, day, category, merchant, amount, used, estimates in records:
+    for id_, day, category, merchant, amount, used, estimates, actual in records:
         card = json.loads(used) if used else None
         options = json.loads(estimates)
         purchases.append(dict(id=id_, date=day, categoryName=category, merchant=merchant,
                               amountKopecks=amount, cardName=card['name'] if card else None,
-                              cashbackComparison=compare_purchase(card, options)))
+                              cashbackComparison=compare_purchase(card, options), actualCashbackKopecks=actual))
         for group, key, label in [('byCategory', category.casefold(), category),
                                   ('byMerchant', merchant.casefold(), merchant),
                                   ('byUsedCard', card['id'] if card else None, card['name'] if card else '')]:
@@ -49,7 +49,8 @@ def summarize(month, records):
     for key, cap in caps.items():
         totals[key]['estimatedKopecks'] = min(totals[key]['estimatedKopecks'], cap)
     ordered = lambda items, field: sorted(items, key=lambda item: (-item[field], item['name'].casefold()))
-    return dict(month=month, count=len(purchases), totalKopecks=sum(p['amountKopecks'] for p in purchases),
+    confirmed = [p["actualCashbackKopecks"] for p in purchases if p["actualCashbackKopecks"] is not None]
+    return dict(month=month, count=len(purchases), actualCashbackKopecks=sum(confirmed), actualCashbackCount=len(confirmed), totalKopecks=sum(p['amountKopecks'] for p in purchases),
                 largestPurchase=max(purchases, key=lambda p: p['amountKopecks'], default=None), purchases=purchases,
                 cardRanking=ordered((x for x in totals.values() if x['estimatedKopecks'] > 0), 'estimatedKopecks'),
                 **{key:ordered(group.values(), 'amountKopecks') for key, group in groups.items()})
@@ -106,10 +107,30 @@ def mount_spending(app, db_path, today, normalize_label, iso_day, estimate_cards
                 return JSONResponse({'code':'login_required'}, 401)
             if not iso_day(month + '-01') or month > current:
                 return JSONResponse({'code':'invalid_month'}, 422)
-            records = db.execute('''SELECT id, day, category, merchant, amount, used_card, estimates FROM purchases
-                WHERE account_id=? AND day BETWEEN ? AND ? ORDER BY day DESC, rowid DESC''',
+            records = db.execute('''SELECT p.id, p.day, p.category, p.merchant, p.amount, p.used_card, p.estimates, c.amount
+                FROM purchases p LEFT JOIN purchase_cashback c ON c.purchase_id=p.id
+                WHERE p.account_id=? AND p.day BETWEEN ? AND ? ORDER BY p.day DESC, p.rowid DESC''',
                 (user[0], month + '-01', month + '-31')).fetchall()
         return summarize(month, records)
+
+    @app.put('/api/me/purchases/{purchase_id}/cashback', status_code=204)
+    def update_cashback(purchase_id: str, body: dict, request: Request):
+        value = body.get('amountKopecks')
+        if 'amountKopecks' not in body or (value is not None and (type(value) is not int or not 0 <= value <= 10**12)):
+            return JSONResponse({'code':'invalid_cashback'}, 422)
+        with connect(db_path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            user = account(db, request)
+            if not user:
+                return JSONResponse({'code':'login_required'}, 401)
+            if not db.execute('SELECT 1 FROM purchases WHERE account_id=? AND id=?', (user[0], purchase_id)).fetchone():
+                return JSONResponse({'code':'unknown_purchase'}, 404)
+            if value is None:
+                db.execute('DELETE FROM purchase_cashback WHERE purchase_id=?', (purchase_id,))
+            else:
+                db.execute('''INSERT INTO purchase_cashback (purchase_id, amount) VALUES (?, ?)
+                    ON CONFLICT(purchase_id) DO UPDATE SET amount=excluded.amount''', (purchase_id, value))
+        return Response(status_code=204)
 
     @app.delete('/api/me/purchases/{purchase_id}', status_code=204)
     def remove(purchase_id: str, request: Request):

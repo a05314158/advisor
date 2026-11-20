@@ -83,6 +83,10 @@ def setup(db):
           used_card TEXT, estimates TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS purchases_account_day ON purchases(account_id, day);
+        CREATE TABLE IF NOT EXISTS purchase_cashback (
+          purchase_id TEXT PRIMARY KEY REFERENCES purchases(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL CHECK(amount BETWEEN 0 AND 1000000000000)
+        );
         CREATE TABLE IF NOT EXISTS purchase_requests (
           account_id TEXT NOT NULL REFERENCES accounts(id), request_key TEXT NOT NULL,
           payload_digest TEXT NOT NULL, purchase_id TEXT NOT NULL,

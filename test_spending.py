@@ -111,3 +111,25 @@ class SpendingTests(unittest.TestCase):
                 self.assertEqual(client.patch(path + '/rate', json={'categoryName':'Такси','rateBps':100}).status_code, 204)
                 self.assertEqual(client.delete(path).status_code, 204)
                 self.assertEqual(client.get(endpoint).json(), first)
+
+    def test_actual_cashback_distinguishes_unknown_and_zero_and_is_private(self):
+        with tempfile.TemporaryDirectory() as folder, patch('advisor.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 20, tzinfo=UTC)
+            app = create_app(Path(folder) / 'test.db')
+            with TestClient(app) as user, TestClient(app) as other:
+                for client, name in [(user, 'confirmed'), (other, 'different')]:
+                    self.assertEqual(client.post('/api/auth/register', json={
+                        'username': name, 'password': 'test-only-long-password'}).status_code, 201)
+                base = '/api/me/purchases'
+                body = {'date':'2026-11-20','categoryName':'Такси','amountKopecks':250000}
+                one, two = [user.post(base, json=body).json()['id'] for _ in range(2)]
+                first, second = [base + '/' + id_ + '/cashback' for id_ in (one, two)]
+                self.assertEqual(other.put(first, json={'amountKopecks':100}).status_code, 404)
+                for endpoint, amount in [(first, 0), (second, 15000)]:
+                    self.assertEqual(user.put(endpoint, json={'amountKopecks':amount}).status_code, 204)
+                report = user.get('/api/me/spending').json()
+                self.assertEqual((report['actualCashbackKopecks'], report['actualCashbackCount']), (15000, 2))
+                self.assertEqual(user.put(second, json={'amountKopecks':None}).status_code, 204)
+                report = user.get('/api/me/spending').json()
+                self.assertEqual((report['actualCashbackKopecks'], report['actualCashbackCount']), (0, 1))
+                self.assertEqual({p['id']:p['actualCashbackKopecks'] for p in report['purchases']}, {one:0, two:None})

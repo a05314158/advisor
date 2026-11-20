@@ -156,6 +156,14 @@ def check(base, chromium=None):
             assert report['purchases'][0]['cashbackComparison']['differenceKopecks'] == 2500
             page.get_by_text('Журнал покупок', exact=True).click()
             expect(page.get_by_text(re.compile(r'Можно было бы вернуть на 25'))).to_be_visible()
+            accrued = page.get_by_label('Фактически начислено, ₽')
+            accrued.fill('0')
+            page.get_by_role('button', name='Сохранить начисление').click()
+            expect(page.get_by_text('заполнено покупок: 1 из 1', exact=False)).to_be_visible()
+            expect(accrued).to_have_value('0')
+            accrued.fill('75,25')
+            page.get_by_role('button', name='Сохранить начисление').click()
+            expect(page.get_by_text(re.compile(r'Начислено по введённым данным: 75,25'))).to_be_visible()
             assert len(requests) == 2 and requests[0] == requests[1]
             assert not errors, errors
         finally:
