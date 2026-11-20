@@ -172,6 +172,21 @@ def check(base, chromium=None):
             page.get_by_role('button', name='Сохранить начисление').click()
             expect(page.get_by_text(re.compile(r'Фактический кэшбэк по покупкам этого месяца: 75,25'))).to_be_visible()
             assert len(requests) == 2 and requests[0] == requests[1]
+            from datetime import UTC, datetime
+            second = page.request.post(base + '/api/me/purchases', data={
+                'date':datetime.now(UTC).date().isoformat(), 'categoryName':'Такси',
+                'merchant':'Черновик', 'amountKopecks':10000,
+            })
+            assert second.status == 201
+            page.reload()
+            page.get_by_text('Журнал покупок', exact=True).click()
+            draft = page.locator('#spending-report .card', has_text='Черновик').get_by_label('Фактически начислено, ₽')
+            draft.fill('39')
+            existing = page.locator('#spending-report div.card').filter(has_text=re.compile(r'2\s500')).last
+            existing.get_by_role('button', name='Сохранить начисление').click()
+            expect(page.get_by_text('заполнено покупок: 1 из 2', exact=False)).to_be_visible()
+            expect(draft).to_have_value('39')
+
             assert not errors, errors
         finally:
             browser.close()
