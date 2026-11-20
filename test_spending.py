@@ -46,3 +46,28 @@ class SpendingTests(unittest.TestCase):
                 self.assertEqual(visitor.delete(f'{purchases}/{item}').status_code,401)
                 self.assertEqual(client.delete(f'{purchases}/{item}').status_code,204)
                 self.assertEqual(client.get(report).json()['totalKopecks'],100000)
+
+    def test_purchase_retry_does_not_duplicate_and_delete_does_not_resurrect(self):
+        with tempfile.TemporaryDirectory() as folder, patch('advisor.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 20, tzinfo=UTC)
+            path = Path(folder) / 'advisor.sqlite3'
+            url = '/api/me/purchases'
+            credentials = {'username':'retry.test','password':'test-only-long-password'}
+            body = {'date':'2026-11-20','categoryName':'Такси','amountKopecks':250000}
+            headers = {'Idempotency-Key':'first-purchase-nonce'}
+            with TestClient(create_app(path)) as client:
+                self.assertEqual(client.post('/api/auth/register', json=credentials).status_code, 201)
+                first = client.post(url, json=body, headers=headers)
+                self.assertEqual(first.status_code, 201)
+            with TestClient(create_app(path)) as client:
+                self.assertEqual(client.post('/api/auth/login', json=credentials).status_code, 200)
+                self.assertEqual(client.post(url, json=body, headers=headers).json(), first.json())
+                report = client.get('/api/me/spending').json()
+                self.assertEqual((report['count'], report['totalKopecks']), (1, 250000))
+                self.assertEqual(client.post(url, json=dict(body, amountKopecks=250100), headers=headers).status_code, 409)
+                second = client.post(url, json=body, headers={'Idempotency-Key':'other-purchase-nonce'})
+                self.assertEqual(second.status_code, 201)
+                self.assertNotEqual(second.json()['id'], first.json()['id'])
+                self.assertEqual(client.delete(url + '/' + first.json()['id']).status_code, 204)
+                self.assertEqual(client.post(url, json=body, headers=headers).json(), first.json())
+                self.assertEqual(client.get('/api/me/spending').json()['count'], 1)

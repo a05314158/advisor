@@ -83,3 +83,29 @@ class MonthlyLimits(unittest.TestCase):
         with TestClient(create_app(self.db)) as second:
             self.assertEqual(second.post('/api/auth/login', json=credentials).status_code, 200)
             self.assertEqual(second.get('/api/me/manual-cards').json()[0]['monthly']['remainingKopecks'], 10000)
+
+    def test_rate_update_changes_ranking_and_preserves_balance_after_restart(self):
+        self.assertEqual(self.update(288000).status_code, 204)
+        self.assertEqual(self.client.post('/api/auth/register', json={
+            'username':'rates.edit', 'password':'test-only-long-password','transferGuestCards':True}).status_code, 201)
+        for name, rate in [('Вторая',400), ('Третья',380), ('Четвёртая',350)]:
+            self.assertEqual(self.client.post('/api/me/manual-cards', json={'name':name, 'rules':[
+                {'categoryName':'Такси','rateBps':rate}]}).status_code, 201)
+        original = self.client.get('/api/me/manual-cards').json()[0]
+        self.assertEqual(self.ranking('Такси')[0]['cashbackKopecks'], 12000)
+        path = self.path.removesuffix('/monthly-limit') + '/rate'
+        with TestClient(create_app(self.db)) as stranger:
+            self.assertEqual(stranger.patch(path, json=dict(categoryName='Такси', rateBps=300)).status_code, 404)
+        self.assertEqual(self.client.patch(path, json=dict(categoryName='Такси', rateBps=True)).status_code, 422)
+        self.assertEqual(self.client.patch(path, json=dict(categoryName='Такси', rateBps=300)).status_code, 204)
+        query = dict(categoryId='Такси', scope='manual', amountKopecks=250000)
+        result = self.client.post('/api/recommendations', json=query).json()
+        self.assertEqual([x['cashbackKopecks'] for x in result['top3']], [10000, 9500, 8750])
+        with TestClient(create_app(self.db)) as restarted:
+            self.assertEqual(restarted.post('/api/auth/login', json={
+                'username':'rates.edit','password':'test-only-long-password'}).status_code, 200)
+            card = restarted.get('/api/me/manual-cards').json()[0]
+            self.assertEqual((card['cardId'], card['monthly']), (original['cardId'], original['monthly']))
+            self.assertEqual(card['rules'][0], dict(original['rules'][0], rateBps=300))
+            self.assertEqual(card['rules'][1], original['rules'][1])
+            self.assertEqual(restarted.post('/api/recommendations', json=query).json(), result)

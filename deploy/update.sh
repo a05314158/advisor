@@ -46,9 +46,7 @@ switch_to() {
 switch_to "$release"
 if systemctl restart advisor.service; then
     for ((attempt=0; attempt<15; attempt++)); do
-        if curl --fail --silent --max-time 2 http://127.0.0.1:8766/healthz >/dev/null &&
-           curl --fail --silent --max-time 2 http://127.0.0.1:8766/api/categories >/dev/null &&
-           curl --fail --silent --max-time 2 http://127.0.0.1:8766/ >/dev/null; then
+        if as_advisor python3 "$release/deploy/smoke.py" http://127.0.0.1:8766 --revision "$revision"; then
             echo "Deployed $revision"
             exit 0
         fi

@@ -1,12 +1,10 @@
 import unittest
-import os
 import tempfile
 from pathlib import Path
 from datetime import UTC, datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from httpx import Response
 
 from advisor import create_app
 
@@ -16,7 +14,8 @@ class RecommendationsAPI(unittest.TestCase):
         clock = self.enterContext(patch('advisor.datetime'))
         clock.now.return_value = datetime(2026, 11, 20, tzinfo=UTC)
         directory = self.enterContext(tempfile.TemporaryDirectory())
-        self.client = self.enterContext(TestClient(create_app(Path(directory) / 'test.db')))
+        self.path = Path(directory) / 'test.db'
+        self.client = self.enterContext(TestClient(create_app(self.path)))
 
     def request(self, **overrides):
         payload = dict(categoryId='supermarkets', amountKopecks=250000, scope='all')
@@ -104,31 +103,62 @@ class RecommendationsAPI(unittest.TestCase):
         self.assertEqual([(item['cardName'], item['cashbackKopecks']) for item in results],
                          [('Моя карта', 20000), ('Карта A', 10000)])
 
-    def test_nearby_suggests_supported_rubrics_in_distance_order(self):
-        payload = {'meta': {'code': 200}, 'result': {'items': [
-            {'name': 'Кафе', 'point': {'lat': 55.7503, 'lon': 37.61}, 'rubrics': [{'name': 'Кафе'}]},
-            {'name': 'Магазин', 'address_name': 'Учебная, 1', 'point': {'lat': 55.75, 'lon': 37.61},
-             'rubrics': [{'name': 'Супермаркеты'}, {'name': 'АЗС'}]},
-            {'name': 'Нотариус', 'point': {'lat': 55.75, 'lon': 37.61}, 'rubrics': [{'name': 'Нотариусы'}]},
-            {'name': 'Дальний магазин', 'point': {'lat': 55.76, 'lon': 37.61},
-             'rubrics': [{'name': 'Супермаркеты'}]},
-        ]}}
-        with patch.dict(os.environ, ADVISOR_2GIS_KEY='test-key'):
-            with patch('nearby.httpx.get', return_value=Response(200, json=payload)) as lookup:
-                result = self.client.post('/api/nearby', json={'latitude': 55.75, 'longitude': 37.61, 'accuracy': 20})
-                places = result.json()['places']
-                self.assertEqual([item['name'] for item in places], ['Магазин', 'Кафе'])
-                self.assertEqual(places[0]['categoryIds'], ['fuel', 'supermarkets'])
-                self.assertEqual(places[0]['address'], 'Учебная, 1')
-                self.assertEqual(lookup.call_args.kwargs['params']['point'], '37.61000,55.75000')
+    def test_manual_category_aliases_are_unique_and_legacy_cards_rank_once(self):
+        import json
 
-    def test_nearby_skips_provider_for_bad_position_or_missing_key(self):
-        with patch.dict(os.environ, ADVISOR_2GIS_KEY=''), patch('nearby.httpx.get') as lookup:
-            location = {'latitude': 55.75, 'longitude': 37.61, 'accuracy': 250}
-            self.assertEqual(self.client.post('/api/nearby', json=location).json()['status'], 'low_accuracy')
-            location['accuracy'] = 20
-            self.assertFalse(self.client.get('/api/nearby').json()['available'])
-            self.assertEqual(self.client.post('/api/nearby', json=location).json()['status'], 'not_configured')
-            location['latitude'] = 100
-            self.assertEqual(self.client.post('/api/nearby', json=location).status_code, 422)
-            lookup.assert_not_called()
+        from catalog import connect
+
+        def create(name, rate):
+            response = self.client.post('/api/me/manual-cards', json={
+                'name':name, 'rules':[{'categoryName':'Кафе','rateBps':rate}],
+            })
+            self.assertEqual(response.status_code, 201)
+            return response.json()['cardId']
+
+        duplicate = self.client.post('/api/me/manual-cards', json={
+            'name':'Одна карта', 'rules':[
+                {'categoryName':'Кафе','rateBps':1000},
+                {'categoryName':'Кафе и рестораны','rateBps':900},
+            ],
+        })
+        self.assertEqual((duplicate.status_code, duplicate.json()['code']), (422, 'duplicate_category'))
+        first, second, third = (create(name, rate) for name, rate in [('Одна', 1000), ('Две', 800), ('Три', 700)])
+        with connect(self.path) as db:
+            rules_json, = db.execute('SELECT rules_json FROM manual_cards WHERE card_id=?', (first,)).fetchone()
+            rules = json.loads(rules_json)
+            rules.append(dict(rules[0], categoryName='Кафе и рестораны', rateBps=900))
+            db.execute('UPDATE manual_cards SET rules_json=? WHERE card_id=?', (json.dumps(rules), first))
+        for options in (dict(categoryId='cafe', scope='mine'),
+                        dict(categoryId='Кафе и рестораны', scope='manual')):
+            result = self.request(**options).json()
+            self.assertEqual([(r['cardId'], r['cashbackKopecks']) for r in result['top3']],
+                             [(first, 25000), (second, 20000), (third, 17500)])
+            self.assertEqual(result['top3'], result['allMatches'])
+
+    def test_location_removed_but_category_groups_still_available(self):
+        self.assertEqual(self.client.get('/api/nearby').status_code, 404)
+        self.assertEqual(self.client.post('/api/nearby', json={}).status_code, 404)
+        response = self.client.get('/')
+        self.assertNotIn(b'navigator.geolocation', response.content)
+        self.assertNotIn(b'/api/nearby', response.content)
+        self.assertIn('supermarkets', self.client.get('/api/categories').json())
+        self.assertTrue(self.client.get('/api/category-groups').json())
+
+    def test_catalog_metadata_is_persistent_and_versions_are_public(self):
+        from catalog import SEED, import_catalog
+
+        before = self.request().json()
+        named = dict(SEED[1], bankName='Учебный Север', cardName='Карта Севера')
+        import_catalog(self.path, [named])
+        published = self.request().json()
+        self.assertNotEqual(published['catalogVersion'], before['catalogVersion'])
+        self.assertEqual(published['top3'][0]['cardName'], 'Карта Севера')
+        self.assertEqual(self.client.get('/api/cards/B').json()['bankName'], 'Учебный Север')
+        self.assertEqual(self.client.put('/api/me/cards/B').status_code, 204)
+        self.assertEqual(self.client.put('/api/me/cards/B/monthly-limit', json={
+            'month':'2026-11','limitKopecks':300000,'usedKopecks':295000}).status_code, 204)
+        self.assertEqual(self.request(scope='mine').json()['catalogVersion'], published['catalogVersion'])
+        self.assertEqual(self.request(scope='manual').json()['catalogVersion'], published['catalogVersion'])
+        self.assertEqual(self.request(scope='mine').json()['top3'][0]['cashbackKopecks'], 5000)
+        import_catalog(self.path, [named])
+        self.assertEqual(self.request().json(), published)

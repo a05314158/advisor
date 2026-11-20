@@ -8,12 +8,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from unicodedata import category as unicode_category, normalize
 
-import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from catalog import CATEGORIES, CATEGORY_GROUPS, SEED, connect, initialize, rows
-from nearby import MAX_ACCURACY_METRES, search_places, within
 from accounts import account, mount_accounts
 from observability import mount_observability
 from spending import mount_spending
@@ -24,7 +22,7 @@ CATEGORY_IDS['кафе и рестораны'] = 'cafe'
 
 
 
-def recommend(category: str, amount: int, day: date, rules=None, own=None) -> dict:
+def recommend(category: str, amount: int, day: date, rules=None, own=None, *, catalog_version=None) -> dict:
     rules = SEED if rules is None else rules
     today = day.isoformat()
     matches = []
@@ -46,20 +44,32 @@ def recommend(category: str, amount: int, day: date, rules=None, own=None) -> di
             match.update(cashbackKopecks=min(cashback, monthly), monthlyLimitApplied=cashback > monthly)
         matches.append(match)
     matches.sort(key=lambda x: (-x['cashbackKopecks'], x['cardId']))
+    ranked = []
+    seen = set()
+    for match in matches:
+        if match['cardId'] not in seen:
+            ranked.append(match)
+            seen.add(match['cardId'])
+    version = rules_version(rules) if catalog_version is None else catalog_version
+    return dict(asOf=today, catalogVersion=version, top3=ranked[:3], allMatches=ranked)
+
+
+def rules_version(rules):
     def canonical(items):
         return sorted(items, key=lambda r: (r['cardId'], r['categoryId'], r['validFrom']))
     snapshot = canonical(rules)
-    version = 'training-v1' if snapshot == canonical(SEED) else hashlib.sha256(
+    return 'training-v1' if snapshot == canonical(SEED) else hashlib.sha256(
         json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
-    return dict(asOf=today, catalogVersion=version, top3=matches[:3], allMatches=matches)
 
 
 def active(rule, today):
     return rule['validFrom'] <= today and (rule['validUntilExclusive'] is None or today < rule['validUntilExclusive'])
 
 
-def card_info(card):
-    return dict(cardId=card, bankName=f'Учебный банк {card}', cardName=f'Карта {card}')
+def card_info(card, rule=None):
+    names = rule or {}
+    return dict(cardId=card, bankName=names.get('bankName', f'Учебный банк {card}'),
+                cardName=names.get('cardName', f'Карта {card}'))
 
 
 COOKIE = 'advisor_session'
@@ -69,6 +79,12 @@ def category_label(raw):
     if not isinstance(raw, str) or any(unicode_category(char) in {'Cc', 'Cf', 'Cs'} for char in raw):
         return ''
     return ' '.join(normalize('NFC', raw).split())
+
+
+def category_key(label):
+    key = label.casefold()
+    category_id = CATEGORY_IDS.get(key)
+    return CATEGORIES[category_id].casefold() if category_id else key
 
 
 def iso_day(raw):
@@ -153,26 +169,6 @@ def create_app(db_path):
     def category_groups():
         return CATEGORY_GROUPS
 
-    @app.get('/api/nearby')
-    def nearby_config():
-        return {'available': bool(os.environ.get('ADVISOR_2GIS_KEY'))}
-
-    @app.post('/api/nearby')
-    def nearby(body: dict):
-        lat, lon, accuracy = body.get('latitude'), body.get('longitude'), body.get('accuracy')
-        if not (within(lat, -90, 90) and within(lon, -180, 180) and within(accuracy, 0, 1000000)):
-            return JSONResponse({'code': 'invalid_location'}, 422)
-        if accuracy > MAX_ACCURACY_METRES:
-            return {'status': 'low_accuracy', 'places': []}
-        key = os.environ.get('ADVISOR_2GIS_KEY')
-        if not key:
-            return {'status': 'not_configured', 'places': []}
-        try:
-            places = search_places(key, lat, lon, accuracy)
-        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
-            return {'status': 'unavailable', 'places': []}
-        return {'status': 'ok', 'places': places}
-
     @app.get('/api/cards')
     def cards(categoryId: str | None = None):
         if categoryId is not None and categoryId not in CATEGORIES:
@@ -183,7 +179,7 @@ def create_app(db_path):
             for rule in rows(db):
                 card = rule['cardId']
                 if categoryId is None or (rule['categoryId'] == categoryId and active(rule, today)):
-                    result.setdefault(card, dict(**card_info(card), rules=[]))
+                    result.setdefault(card, dict(**card_info(card, rule), rules=[]))
                     if active(rule, today):
                         result[card]['rules'].append(rule)
         return list(result.values())
@@ -195,7 +191,7 @@ def create_app(db_path):
             rules = [r for r in rows(db) if r['cardId'] == card]
         if not rules:
             return JSONResponse({'code': 'unknown_card'}, 404)
-        return dict(**card_info(card), rules=[r for r in rules if active(r, today)])
+        return dict(**card_info(card, rules[0]), rules=[r for r in rules if active(r, today)])
 
     def saved(db, request):
         return [row[0] for row in db.execute('SELECT cardId FROM saved WHERE session = ? ORDER BY cardId',
@@ -223,10 +219,11 @@ def create_app(db_path):
         month = day.isoformat()[:7]
         def display_rule(rule, updated):
             label = rule.get('categoryName') or CATEGORIES[rule['categoryId']]
-            return {**rule, 'categoryName': label, 'categoryKey': label.casefold(),
+            return {**rule, 'categoryName': label, 'categoryKey': category_key(label),
                     'minAmountKopecks': rule.get('minAmountKopecks', 0),
                     'validFrom': rule.get('validFrom', updated),
-                    'validUntilExclusive': rule.get('validUntilExclusive'), 'updatedOn': updated}
+                    'validUntilExclusive': rule.get('validUntilExclusive'),
+                    'updatedOn': rule.get('updatedOn', updated)}
 
         return [dict(cardId=card, name=name, bankName=bank, updatedOn=updated,
                      monthly=monthly_balance(month, cap, used),
@@ -244,7 +241,7 @@ def create_app(db_path):
             cards = manual_cards(db, request, datetime.now(UTC).date())
         if categoryName is None:
             return cards
-        key = category_label(categoryName).casefold()
+        key = category_key(category_label(categoryName))
         return [card for card in cards if any(rule['categoryKey'] == key for rule in card['rules'])]
 
     @app.post('/api/me/manual-cards', status_code=201)
@@ -271,7 +268,7 @@ def create_app(db_path):
             category, rate, limit = rule.get('categoryId'), rule.get('rateBps'), rule.get('limitKopecks')
             label = category_label(rule['categoryName']) if 'categoryName' in rule else (
                 CATEGORIES.get(category, '') if isinstance(category, str) else '')
-            key = label.casefold()
+            key = category_key(label)
             minimum = rule.get('minAmountKopecks', 0)
             start = rule.get('validFrom', today)
             end = rule.get('validUntilExclusive')
@@ -307,6 +304,38 @@ def create_app(db_path):
         response = JSONResponse({'cardId': card}, 201)
         guest_cookie(response, request, session)
         return response
+
+    @app.patch('/api/me/manual-cards/{card}/rate', status_code=204)
+    def update_rate(card: str, body: dict, request: Request):
+        label, rate = category_label(body.get('categoryName')), body.get('rateBps')
+        if not 1 <= len(label) <= 80 or type(rate) is not int or not 0 <= rate <= 10000:
+            return JSONResponse({'code': 'invalid_rate_update'}, 422)
+        with connect(db_path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            owner = card_owner(db, request)
+            row = db.execute('SELECT rules_json, updated_on FROM manual_cards WHERE session=? AND card_id=?',
+                             (owner, card)).fetchone()
+            if row is None:
+                return JSONResponse({'code': 'unknown_card'}, 404)
+            rules = json.loads(row[0])
+            matching = [rule for rule in rules
+                        if category_key(rule.get('categoryName') or CATEGORIES[rule['categoryId']]) == category_key(label)]
+            if not matching:
+                return JSONResponse({'code': 'unknown_category'}, 404)
+            if len(matching) > 1:
+                matching = [rule for rule in matching
+                            if (rule.get('categoryName') or CATEGORIES[rule['categoryId']]).casefold() == label.casefold()]
+                if len(matching) != 1:
+                    return JSONResponse({'code': 'ambiguous_category'}, 409)
+            if matching[0]['rateBps'] != rate:
+                updated = datetime.now(UTC).date().isoformat()
+                for rule in rules:
+                    rule.setdefault('validFrom', row[1])
+                    rule.setdefault('updatedOn', row[1])
+                matching[0].update(rateBps=rate, updatedOn=updated)
+                db.execute('UPDATE manual_cards SET rules_json=?, updated_on=? WHERE session=? AND card_id=?',
+                           (json.dumps(rules), updated, owner, card))
+        return Response(status_code=204)
 
     def update_limit(card, body, request, *, catalog):
         cap, used = body.get('limitKopecks'), body.get('usedKopecks')
@@ -367,7 +396,7 @@ def create_app(db_path):
             return JSONResponse({'field': 'amountKopecks', 'code': 'positive_integer_required'}, 422)
         if scope == 'manual':
             label = category_label(category)
-            category = label.casefold() if 1 <= len(label) <= 80 else ''
+            category = category_key(label) if 1 <= len(label) <= 80 else ''
         if not isinstance(category, str) or not category or (scope != 'manual' and category not in CATEGORIES):
             return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
         if scope not in ('all', 'mine', 'manual'):
@@ -375,7 +404,9 @@ def create_app(db_path):
         day = datetime.now(UTC).date()
         with connect(db_path) as db:
             db.execute('BEGIN')
-            catalog_rules = [] if scope == 'manual' else rows(db)
+            public_rules = rows(db)
+            version = rules_version(public_rules)
+            catalog_rules = [] if scope == 'manual' else public_rules
             personal_caps = catalog_monthly(db, request, day) if scope == 'mine' else {}
             rules = [{**rule, **monthly_fields(personal_caps[rule['cardId']])}
                      if rule['cardId'] in personal_caps else rule for rule in catalog_rules]
@@ -390,16 +421,16 @@ def create_app(db_path):
                                       'cardId': card['cardId'], 'cardName': card['name'],
                                       'bankName': card['bankName'] or 'Банк не указан',
                                       **monthly_fields(card['monthly'])})
-        result = recommend(category, amount, day, rules, own)
+        result = recommend(category, amount, day, rules, own, catalog_version=version)
         if scope == 'mine' and not any(card['cashbackKopecks'] > 0 for card in result['top3']):
             unowned = {rule['cardId'] for rule in catalog_rules} - own
-            alternatives = recommend(category, amount, day, catalog_rules, unowned)['top3']
+            alternatives = recommend(category, amount, day, catalog_rules, unowned, catalog_version=version)['top3']
             if alternatives and alternatives[0]['cashbackKopecks'] > 0:
                 result['catalogSuggestion'] = alternatives[0]
         return result
 
     def spending_cards(db, request, day, category, amount):
-        key = category.casefold()
+        key = category_key(category)
         category_id = CATEGORY_IDS.get(key)
         personal = manual_cards(db, request, day)
         used_catalog_ids = set(saved(db, request))
@@ -414,7 +445,7 @@ def create_app(db_path):
         for rule in rows(db):
             if rule['cardId'] in used_catalog_ids:
                 card_id = rule['cardId']
-                names[card_id] = card_info(card_id)['cardName']
+                names[card_id] = card_info(card_id, rule)['cardName']
                 if rule['categoryId'] == category_id:
                     candidates.append({**rule, 'categoryId':key})
         estimates = {}

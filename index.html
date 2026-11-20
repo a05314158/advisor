@@ -33,8 +33,6 @@
     .muted, small { color: #4b6257; }
     p[role=status]:empty { margin: 0; }
     #status:not(:empty) { margin-top: .6rem; }
-    #nearby-list:not(:empty) { margin-top: .45rem; }
-    #geo-status:not(:empty) { margin-top: .35rem; }
     summary { cursor: pointer; padding: .45rem 0; min-height: 44px; }
     details > .stack { margin-top: .35rem; }
     ul { margin: .35rem 0 0; padding-left: 1.15rem; }
@@ -64,10 +62,6 @@
       <label>Сумма покупки, ₽<input id="amount" inputmode="decimal" maxlength="14" required></label>
     </div>
     <div>
-      <button type="button" class="secondary" id="locate" aria-describedby="geo-note">Найти магазин рядом</button>
-      <small id="geo-note">Для поиска приблизительные координаты передаются в 2ГИС.</small>
-      <p id="geo-status" class="muted" role="status"></p>
-      <div id="nearby-list" class="stack"></div>
     </div>
     <button id="compare" disabled>Рассчитать кэшбэк</button>
   </form>
@@ -223,10 +217,10 @@ function optionalAmount(input) {
   return value >= 0 && value <= 10**12 ? value : NaN;
 }
 
-async function api(path, {method = 'GET', body, timeout = 8000} = {}) {
+async function api(path, {method = 'GET', body, timeout = 8000, headers = {}} = {}) {
   const request = {method, signal: AbortSignal.timeout(timeout)};
   if (body) {
-    request.headers = {'Content-Type': 'application/json'};
+    request.headers = {...headers, 'Content-Type': 'application/json'};
     request.body = JSON.stringify(body);
   }
   const response = await fetch(path, request);
@@ -295,6 +289,48 @@ function rateAndLimit(rule) {
     (rule.limitKopecks === null ? ' · лимит не задан' : ' · лимит ' + money(rule.limitKopecks));
 }
 
+function rateForm(card) {
+  const details = element('details');
+  const form = element('form', '', 'stack');
+  const categoryLabel = element('label', 'Категория');
+  const rateLabel = element('label', 'Новая ставка, %');
+  const select = element('select');
+  const input = element('input');
+  input.inputMode = 'decimal';
+  input.required = true;
+  input.maxLength = 6;
+  const submit = element('button', 'Сохранить ставку');
+  const message = element('p');
+  message.setAttribute('role', 'status');
+  for (const [index, rule] of card.rules.entries()) {
+    select.add(new Option(rule.categoryName, index));
+  }
+  const showRate = () => {
+    input.value = String(card.rules[Number(select.value)].rateBps / 100).replace('.', ',');
+  };
+  select.onchange = showRate;
+  showRate();
+  categoryLabel.append(select);
+  rateLabel.append(input);
+  form.append(categoryLabel, rateLabel, submit, message);
+  details.append(element('summary', 'Изменить ставку'), form);
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy || authBusy) return;
+    const rateBps = fixed(input.value);
+    if (!(rateBps >= 0 && rateBps <= 10000)) {
+      message.textContent = 'Введите процент от 0 до 100 с точностью до двух знаков.';
+      return;
+    }
+    const categoryName = card.rules[Number(select.value)].categoryName;
+    submit.disabled = true;
+    await updateCards(() => api('/api/me/manual-cards/' + encodeURIComponent(card.cardId) + '/rate',
+      {method:'PATCH', body:{categoryName, rateBps}}), 'Ставка сохранена. Можно пересчитать кэшбэк.');
+    submit.disabled = false;
+  };
+  return details;
+}
+
 function cardListing(card, action) {
   const entry = element('article', '', 'card');
   entry.append(element('h3', card.cardName || card.name));
@@ -317,6 +353,7 @@ function cardListing(card, action) {
     monthly.append(element('summary', 'Месячный лимит'), monthlyForm(card));
     entry.append(monthly);
   }
+  if (!card.cardName && card.rules.length) entry.append(rateForm(card));
   if (action) entry.append(action);
   return entry;
 }
@@ -458,107 +495,10 @@ $('logout').onclick = () => changeAccount('logout', {});
 $('add-rule').onclick = () => addRow().querySelector('input').focus();
 $('retry').onclick = () => updateCards();
 $('catalog-category').onchange = renderCatalog;
+$('category').onchange = compareEnabled;
 $('scope').onchange = () => {
   clearResults();
   renderCategories();
-};
-
-const geolocationErrors = {
-  1: 'Нет доступа к геопозиции. Выберите категорию вручную.',
-  2: 'Устройство не определило геопозицию. Выберите категорию вручную.',
-  3: 'Поиск геопозиции занял слишком много времени. Выберите категорию вручную.',
-};
-const nearbyConfig = api('/api/nearby').catch(() => null);
-let locationRequest = 0;
-
-function showNearby(places, groups) {
-  const nearbyCategories = new Set(places.flatMap(place => place.categoryIds));
-  const suggestions = Object.entries(groups).filter(([, group]) =>
-    Object.keys(group).some(id => nearbyCategories.has(id))
-  );
-  if (!suggestions.length) {
-    $('geo-status').textContent = 'Подходящих мест рядом не найдено. Выберите категорию вручную.';
-    return;
-  }
-  $('geo-status').textContent = 'Группы по геопозиции. Уточните категорию покупки.';
-  for (const [name, group] of suggestions) {
-    const entry = element('details', '', 'card');
-    entry.open = suggestions.length === 1;
-    const choices = element('div', '', 'actions');
-    entry.append(element('summary', name), choices);
-    for (const [categoryId, label] of Object.entries(group)) {
-      const button = element('button', label, 'secondary');
-      button.type = 'button';
-      button.onclick = () => {
-        $('category').value = categoryId;
-        compareEnabled();
-        clearResults();
-        $('nearby-list').replaceChildren();
-        $('geo-status').textContent = 'Выбрано: ' + label;
-        $('amount').focus();
-      };
-      choices.append(button);
-    }
-    $('nearby-list').append(entry);
-  }
-  const all = element('button', 'Все категории', 'secondary');
-  all.type = 'button';
-  all.onclick = () => {
-    $('category').focus();
-    try { $('category').showPicker?.(); } catch { /* The select can still be opened manually. */ }
-  };
-  $('nearby-list').append(all, element('small', 'Рубрика места может отличаться от категории в банке.'));
-}
-
-$('category').onchange = () => {
-  compareEnabled();
-  locationRequest++;
-  $('locate').disabled = false;
-  $('geo-status').textContent = '';
-  $('nearby-list').replaceChildren();
-};
-
-$('locate').onclick = async () => {
-  const current = ++locationRequest;
-  $('locate').disabled = true;
-  $('nearby-list').replaceChildren();
-  $('geo-status').textContent = 'Проверяем доступность поиска…';
-  try {
-    const config = await nearbyConfig;
-    if (current !== locationRequest) return;
-    if (!config?.available || !navigator.geolocation || !window.isSecureContext) {
-      $('geo-status').textContent = 'Поиск по геопозиции недоступен. Выберите категорию вручную.';
-      return;
-    }
-    $('geo-status').textContent = 'Определяем геопозицию…';
-    const {coords} = await new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject,
-        {enableHighAccuracy: true, timeout: 6000, maximumAge: 0});
-    });
-    if (current !== locationRequest) return;
-    $('geo-status').textContent = 'Ищем магазины рядом…';
-    const [{status, places}, groups] = await Promise.all([
-      api('/api/nearby', {
-        method: 'POST', body: {latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy}
-      }),
-      Object.keys(categoryGroups).length ? categoryGroups : api('/api/category-groups')
-    ]);
-    if (current !== locationRequest) return;
-    if (status === 'low_accuracy') {
-      $('geo-status').textContent = 'Геопозиция слишком неточная. Выберите категорию вручную.';
-    } else if (status === 'ok') {
-      showNearby(places, groups);
-    } else {
-      $('geo-status').textContent = 'Справочник мест недоступен. Выберите категорию вручную.';
-    }
-  } catch (error) {
-    if (current === locationRequest) {
-      $('geo-status').textContent = geolocationErrors[error.code] ||
-        'Не удалось найти место. Выберите категорию вручную.';
-    }
-  } finally {
-    if (current === locationRequest) $('locate').disabled = false;
-  }
 };
 
 $('manual-form').onsubmit = async event => {
@@ -759,6 +699,7 @@ $('purchase-entry').ontoggle = () => {
   if (!$('purchase-category').value && category?.value) $('purchase-category').value = category.textContent;
   if (!$('purchase-amount').value) $('purchase-amount').value = $('amount').value;
 };
+let pendingPurchase;
 $('purchase-form').onsubmit = async event => {
   event.preventDefault();
   const button = $('purchase-form').querySelector('button'), status = $('purchase-status');
@@ -771,9 +712,16 @@ $('purchase-form').onsubmit = async event => {
   button.disabled = true;
   status.textContent = 'Сохраняем…';
   try {
-    await api('/api/me/purchases', {method:'POST', body:{date, amountKopecks,
-      categoryName:$('purchase-category').value, merchant:$('purchase-merchant').value,
-      cardId:$('purchase-card').value || null}});
+    const body = {date, amountKopecks, categoryName:$('purchase-category').value,
+      merchant:$('purchase-merchant').value, cardId:$('purchase-card').value || null};
+    const fingerprint = JSON.stringify(body);
+    if (pendingPurchase?.fingerprint !== fingerprint) {
+      const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+        n => n.toString(16).padStart(2, '0')).join('');
+      pendingPurchase = {fingerprint, nonce};
+    }
+    await api('/api/me/purchases', {method:'POST', body, headers:{'Idempotency-Key':pendingPurchase.nonce}});
+    pendingPurchase = undefined;
     $('purchase-form').reset();
     $('purchase-date').value = utcToday;
     $('purchase-entry').open = false;

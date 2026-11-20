@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from unicodedata import category, normalize
 
 CATEGORY_GROUPS = {
     'Еда и покупки': {
@@ -50,6 +51,9 @@ def setup(db):
           minAmountKopecks INTEGER, validFrom TEXT, validUntilExclusive TEXT, updatedOn TEXT,
           PRIMARY KEY (cardId, categoryId, validFrom)
         );
+        CREATE TABLE IF NOT EXISTS catalog_cards (
+          id TEXT PRIMARY KEY, bank_name TEXT NOT NULL, name TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS saved (
           session TEXT, cardId TEXT, PRIMARY KEY(session, cardId)
         );
@@ -79,6 +83,11 @@ def setup(db):
           used_card TEXT, estimates TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS purchases_account_day ON purchases(account_id, day);
+        CREATE TABLE IF NOT EXISTS purchase_requests (
+          account_id TEXT NOT NULL REFERENCES accounts(id), request_key TEXT NOT NULL,
+          payload_digest TEXT NOT NULL, purchase_id TEXT NOT NULL,
+          PRIMARY KEY(account_id, request_key)
+        );
         CREATE TABLE IF NOT EXISTS catalog_monthly_usage (
           owner TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
           used INTEGER NOT NULL CHECK(used BETWEEN 0 AND 1000000000000),
@@ -99,13 +108,33 @@ def setup(db):
 
 
 def rows(db):
-    return [dict(zip(FIELDS, row)) for row in db.execute('SELECT * FROM rules ORDER BY cardId, categoryId, validFrom')]
+    result = []
+    for *values, bank, name in db.execute('''SELECT r.cardId, r.categoryId, r.rateBps, r.limitKopecks,
+        r.minAmountKopecks, r.validFrom, r.validUntilExclusive, r.updatedOn, c.bank_name, c.name
+        FROM rules r LEFT JOIN catalog_cards c ON c.id=r.cardId
+        ORDER BY r.cardId, r.categoryId, r.validFrom'''):
+        rule = dict(zip(FIELDS, values))
+        if bank is not None:
+            rule.update(bankName=bank, cardName=name)
+        result.append(rule)
+    return result
+
+
+def catalog_label(value):
+    if not isinstance(value, str) or any(category(char) in {'Cc', 'Cf', 'Cs'} for char in value):
+        raise ValueError('Неверное название банка или карты')
+    clean = ' '.join(normalize('NFC', value).split())
+    if not 1 <= len(clean) <= 80:
+        raise ValueError('Неверное название банка или карты')
+    return clean
 
 
 def apply_rules(db, items):
-    seen = set()
+    seen, names = set(), {}
+    metadata_fields = {'bankName', 'cardName'}
+    fields = set(FIELDS)
     for rule in items:
-        if not isinstance(rule, dict) or set(rule) != set(FIELDS):
+        if not isinstance(rule, dict) or set(rule) not in (fields, fields | metadata_fields):
             raise ValueError('Неверные поля условия')
         c, k, r, l, m, start, end, updated = (rule[f] for f in FIELDS)
         if (not isinstance(c, str) or not c.isascii() or not c.isalnum() or len(c) > 32
@@ -119,7 +148,14 @@ def apply_rules(db, items):
         if start >= end or (c, k, start) in seen:
             raise ValueError('Пустой период или повтор правила в пакете')
         seen.add((c, k, start))
+        if metadata_fields <= rule.keys():
+            metadata = catalog_label(rule['bankName']), catalog_label(rule['cardName'])
+            if names.setdefault(c, metadata) != metadata:
+                raise ValueError(f'Несогласованные названия для карты: {c}')
         db.execute('INSERT OR REPLACE INTO rules VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (c,k,r,l,m,start,end,updated))
+    db.executemany('''INSERT INTO catalog_cards (id, bank_name, name) VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET bank_name=excluded.bank_name, name=excluded.name''',
+        ((card, bank, name) for card, (bank, name) in names.items()))
     previous = None
     for rule in rows(db):
         key = rule['cardId'], rule['categoryId']

@@ -1,4 +1,6 @@
+import hashlib
 import json
+import re
 import secrets
 
 from fastapi import Request, Response
@@ -41,6 +43,9 @@ def mount_spending(app, db_path, today, normalize_label, iso_day, estimate_cards
     @app.post('/api/me/purchases', status_code=201)
     def record(body: dict, request: Request):
         day, amount, card = body.get('date'), body.get('amountKopecks'), body.get('cardId')
+        request_key = request.headers.get('Idempotency-Key')
+        if request_key is not None and not re.fullmatch(r'[A-Za-z0-9_-]{16,128}', request_key):
+            return JSONResponse({'code':'invalid_idempotency_key'}, 422)
         category = normalize_label(body.get('categoryName'))
         raw_merchant = body.get('merchant', '')
         merchant = normalize_label(raw_merchant)
@@ -53,6 +58,15 @@ def mount_spending(app, db_path, today, normalize_label, iso_day, estimate_cards
                     or not 1 <= len(category) <= 80 or len(merchant) > 120 or not isinstance(raw_merchant, str)
                     or (raw_merchant.strip() and not merchant) or (card is not None and not isinstance(card, str))):
                 return JSONResponse({'code':'invalid_purchase'}, 422)
+            if request_key is not None:
+                payload = json.dumps([day, amount, card, category, merchant], ensure_ascii=False)
+                digest = hashlib.sha256(payload.encode()).hexdigest()
+                existing = db.execute('''SELECT payload_digest, purchase_id FROM purchase_requests
+                    WHERE account_id=? AND request_key=?''', (user[0], request_key)).fetchone()
+                if existing:
+                    if digest != existing[0]:
+                        return JSONResponse({'code':'idempotency_key_conflict'}, 409)
+                    return {'id':existing[1]}
             day_value = today().fromisoformat(day)
             names, estimates = estimate_cards(db, request, day_value, category, amount)
             if card is not None and card not in names:
@@ -61,6 +75,9 @@ def mount_spending(app, db_path, today, normalize_label, iso_day, estimate_cards
             id_ = secrets.token_hex(16)
             db.execute('INSERT INTO purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                        (id_, user[0], day, category, merchant, amount, used, json.dumps(estimates)))
+            if request_key is not None:
+                db.execute('INSERT INTO purchase_requests VALUES (?, ?, ?, ?)',
+                           (user[0], request_key, digest, id_))
         return {'id':id_}
 
     @app.get('/api/me/spending')
