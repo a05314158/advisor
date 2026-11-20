@@ -41,6 +41,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Publish the tested revision for the staging VM
         run: |
           latest=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
