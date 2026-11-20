@@ -120,7 +120,7 @@
             <button type="button" class="secondary" id="change-bank">Сменить банк</button>
           </div>
           <label id="manual-bank-label" hidden>Название банка<input id="manual-bank" maxlength="80" required></label>
-          <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
+          <label id="manual-name-label">Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
           <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
           <label>Уже начислено в этом месяце, ₽<input id="manual-monthly-used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
           <div id="manual-rules" class="stack"></div>
@@ -360,7 +360,9 @@ function rateForm(card) {
 function cardListing(card, action) {
   const entry = element('article', '', 'card');
   entry.append(element('h3', card.cardName || card.name));
-  if (card.bankName) entry.append(element('p', card.bankName, 'muted'));
+  if (card.bankName && card.bankName !== (card.cardName || card.name)) {
+    entry.append(element('p', card.bankName, 'muted'));
+  }
   if (card.rules.length) {
     const list = element('ul');
     for (const rule of card.rules) {
@@ -496,7 +498,10 @@ function selectBank(name) {
   $('manual-bank-label').hidden = Boolean(name);
   $('manual-bank').readOnly = Boolean(name);
   $('manual-bank').value = name || '';
-  $(name ? 'manual-name' : 'manual-bank').focus();
+  $('manual-name-label').hidden = Boolean(name);
+  $('manual-name').disabled = Boolean(name);
+  const next = name ? $('manual-rules').querySelector('[name=category]') : $('manual-bank');
+  next.focus();
 }
 
 function showBankPicker() {
@@ -595,8 +600,9 @@ $('scope').onchange = () => {
 $('manual-form').onsubmit = async event => {
   event.preventDefault();
   if (busy || authBusy || !dataReady) return;
-  const name = $('manual-name').value.trim(), rules = [];
   const bankName = $('manual-bank').value.trim();
+  const name = $('manual-name').disabled ? bankName : $('manual-name').value.trim();
+  const rules = [];
   const monthlyLimitKopecks = optionalAmount($('manual-monthly-cap'));
   const monthlyUsedKopecks = optionalAmount($('manual-monthly-used'));
   if ([monthlyLimitKopecks, monthlyUsedKopecks].some(Number.isNaN)) {
@@ -706,10 +712,11 @@ function resultCard(match, winner = false) {
     : match.monthlyBalanceStatus === 'assumed_full' ? `Остаток неизвестен: использован полный лимит ${money(match.monthlyLimitKopecks)}`
     : match.monthlyBalanceStatus === 'not_set' ? 'Общий лимит не задан; месячный остаток не учтён.'
     : 'Личные лимиты каталога в этом расчёте не учитываются.';
+  const issuer = match.bankName === match.cardName ? '' : match.bankName + ' · ';
   entry.append(
     element('h3', (winner ? 'Лучший выбор · ' : '') + match.cardName),
     element('p', money(match.cashbackKopecks) + ' кэшбэка', 'return'),
-    element('p', match.bankName + ' · ' + rateAndLimit(match) +
+    element('p', issuer + rateAndLimit(match) +
       (match.monthlyLimitApplied ? ' · применён месячный лимит' : match.limitApplied ? ' · лимит категории сработал' : ''), 'muted'),
     element('small', monthly),
     details
