@@ -17,6 +17,7 @@ from bank_links import bank_access
 from observability import mount_observability
 from spending import mount_spending
 PAGE = Path(__file__).with_name('index.html')
+BANKS = Path(__file__).with_name('banks_ru.json')
 BUILD_REVISION = '$Format:%H$'
 CATEGORY_IDS = {label.casefold(): category_id for category_id, label in CATEGORIES.items()}
 CATEGORY_IDS['кафе и рестораны'] = 'cafe'
@@ -147,6 +148,7 @@ def create_app(db_path):
     @asynccontextmanager
     async def lifespan(app):
         app.state.html = PAGE.read_bytes()
+        app.state.bank_directory = json.loads(BANKS.read_text(encoding='utf-8'))
         initialize(db_path)
         yield
 
@@ -167,6 +169,10 @@ def create_app(db_path):
         if re.fullmatch(r'[0-9a-f]{40}', BUILD_REVISION):
             status['revision'] = BUILD_REVISION
         return status
+
+    @app.get('/api/banks')
+    def banks():
+        return app.state.bank_directory
 
     @app.get('/api/categories')
     def categories():

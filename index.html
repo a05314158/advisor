@@ -111,8 +111,11 @@
         <div id="bank-picker" class="stack">
           <label>Найти банк<input id="bank-search" type="search" autocomplete="off" placeholder="Например, Т‑Банк"></label>
           <div class="bank-grid" id="bank-options" aria-label="Банки"></div>
-          <p id="bank-status" role="status" hidden>Банк не найден. Его можно указать вручную.</p>
-          <button type="button" class="secondary" id="other-bank">Другой банк</button>
+          <p id="bank-status" class="muted" role="status"></p>
+          <div class="actions">
+            <button type="button" class="secondary" id="more-banks" hidden>Показать ещё</button>
+            <button type="button" class="secondary" id="other-bank">Другой банк</button>
+          </div>
         </div>
         <form id="manual-form" class="stack" hidden>
           <div class="actions">
@@ -161,14 +164,18 @@ let categoryGroups = {};
 let catalog = [];
 let saved = new Set();
 let catalogBalances = {};
-const BANKS = [
-  {name:'Т‑Банк', mark:'Т', aliases:'Тинькофф Tinkoff TBank', bg:'#ffd524', ink:'#211c0e'},
-  {name:'Альфа‑Банк', mark:'А', aliases:'Alfa Bank', bg:'#be1a22', ink:'#fff'},
-  {name:'Сбер', mark:'С', aliases:'Сбербанк Sberbank', bg:'#08734e', ink:'#fff'},
-  {name:'ВТБ', mark:'В', aliases:'VTB', bg:'#10448c', ink:'#fff'},
-  {name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
-  {name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
+const featuredBanks = [
+  {registrationNumber:'2673', name:'Т‑Банк', mark:'Т', aliases:'Тинькофф Tinkoff TBank', bg:'#ffd524', ink:'#211c0e'},
+  {registrationNumber:'1326', name:'Альфа‑Банк', mark:'А', aliases:'Alfa Bank', bg:'#be1a22', ink:'#fff'},
+  {registrationNumber:'1481', name:'Сбер', mark:'С', aliases:'Сбербанк Sberbank', bg:'#08734e', ink:'#fff'},
+  {registrationNumber:'1000', name:'ВТБ', mark:'В', aliases:'VTB', bg:'#10448c', ink:'#fff'},
+  {registrationNumber:'3542', name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
+  {registrationNumber:'3027', name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
 ];
+let bankDirectory = featuredBanks;
+let bankLimit = featuredBanks.length;
+let bankDirectoryState = 'loading';
+const bankPageSize = 24;
 const popularCategories = ['supermarkets','groceries','cafe','taxi','pharmacies','marketplaces'];
 let manual = [];
 
@@ -471,24 +478,48 @@ async function updateCards(change, completion = '') {
 }
 
 function searchKey(text) {
-  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return text.normalize('NFKC').toLowerCase().replaceAll('ё', 'е').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+async function loadBankDirectory() {
+  try {
+    const {banks} = await api('/api/banks');
+    const featured = new Map(featuredBanks.map(bank => [bank.registrationNumber, bank]));
+    bankDirectory = banks.map(bank => ({...bank, ...featured.get(bank.registrationNumber)}));
+    bankDirectory.sort((left, right) => {
+      const byFeatured = Number(featured.has(right.registrationNumber)) - Number(featured.has(left.registrationNumber));
+      return byFeatured || left.name.localeCompare(right.name, 'ru');
+    });
+    bankDirectoryState = 'ready';
+  } catch {
+    bankDirectoryState = 'unavailable';
+  }
+  renderBankChoices();
 }
 
 function renderBankChoices() {
   const query = searchKey($('bank-search').value);
-  const list = BANKS.filter(bank => searchKey(bank.name + ' ' + bank.aliases).includes(query));
-  $('bank-options').replaceChildren(...list.map(bank => {
+  const list = bankDirectory.filter(bank =>
+    [bank.name, bank.registeredName, bank.aliases, bank.registrationNumber].some(term => term && searchKey(term).includes(query)));
+  $('bank-options').replaceChildren(...list.slice(0, bankLimit).map(bank => {
     const button = element('button', '', 'bank-tile secondary');
     button.type = 'button';
-    const mark = element('span', bank.mark, 'bank-mark');
+    const mark = element('span', bank.mark || bank.name.charAt(0).toUpperCase(), 'bank-mark');
     mark.setAttribute('aria-hidden', 'true');
-    mark.style.setProperty('--mark-bg', bank.bg);
-    mark.style.setProperty('--mark-ink', bank.ink);
+    mark.style.setProperty('--mark-bg', bank.bg || '#e4ede8');
+    mark.style.setProperty('--mark-ink', bank.ink || '#182b27');
     button.append(mark, element('span', bank.name));
     button.onclick = () => selectBank(bank.name);
     return button;
   }));
-  $('bank-status').hidden = list.length > 0;
+  const more = $('more-banks');
+  more.hidden = list.length <= bankLimit;
+  more.textContent = !query && bankLimit === featuredBanks.length
+    ? 'Все банки (' + list.length + ')' : 'Показать ещё';
+  $('bank-status').textContent = bankDirectoryState === 'loading' ? 'Загружаем справочник…'
+    : bankDirectoryState === 'unavailable' ? 'Справочник недоступен. Банк можно указать вручную.'
+    : !list.length ? 'Банк не найден. Его можно указать вручную.'
+    : query ? 'Найдено банков: ' + list.length : '';
 }
 
 function selectBank(name) {
@@ -508,6 +539,7 @@ function showBankPicker() {
   $('manual-form').hidden = true;
   $('bank-picker').hidden = false;
   $('bank-search').value = '';
+  bankLimit = featuredBanks.length;
   renderBankChoices();
 }
 
@@ -582,7 +614,16 @@ $('account-form').onsubmit = event => {
   changeAccount(action, payload);
 };
 $('logout').onclick = () => changeAccount('logout', {});
-$('bank-search').oninput = renderBankChoices;
+$('bank-search').oninput = () => {
+  bankLimit = $('bank-search').value.trim() ? bankPageSize : featuredBanks.length;
+  renderBankChoices();
+};
+$('more-banks').onclick = () => {
+  const firstNewIndex = bankLimit;
+  bankLimit += bankPageSize;
+  renderBankChoices();
+  $('bank-options').children[firstNewIndex]?.focus();
+};
 $('other-bank').onclick = () => selectBank();
 $('change-bank').onclick = () => {
   showBankPicker();
@@ -924,6 +965,7 @@ $('purchase-form').onsubmit = async event => {
 };
 
 renderBankChoices();
+loadBankDirectory();
 addRow();
 updateCards();
 loadAccount();

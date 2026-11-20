@@ -174,3 +174,15 @@ class RecommendationsAPI(unittest.TestCase):
         self.assertEqual(first['bankAccess']['webUrl'], 'https://www.tbank.ru/login/')
         self.assertEqual(second['bankAccess']['webUrl'], 'https://web.alfabank.ru/')
         self.assertNotIn('bankAccess', third)
+
+    def test_bank_picker_uses_the_russian_central_bank_directory(self):
+        response = self.client.get('/api/banks')
+        self.assertEqual(response.status_code, 200)
+        directory = response.json()
+        self.assertEqual(directory['source'], 'https://www.cbr.ru/banking_sector/credit/FullCoList')
+        banks = {bank['registrationNumber']:bank for bank in directory['banks']}
+        self.assertGreater(len(banks), 100)
+        self.assertEqual(len(banks), len(directory['banks']))
+        self.assertEqual(banks['1927']['name'], 'Модульбанк')
+        self.assertNotIn('3166', banks)
+        self.assertNotIn('654', banks)
