@@ -73,6 +73,26 @@
   </form>
   <p id="status" role="status"></p>
   <section id="results" class="stack" aria-label="Результаты расчёта"></section>
+  <section class="panel stack" aria-labelledby="spending-title">
+    <h2 id="spending-title">Статистика трат</h2>
+    <p id="spending-guest">Войдите в аккаунт, чтобы записывать покупки и видеть отчёт.</p>
+    <div id="spending-content" class="stack" hidden>
+      <details id="purchase-entry"><summary>Записать покупку</summary>
+        <form id="purchase-form" class="stack">
+          <label>Дата покупки<input id="purchase-date" type="date" required></label>
+          <label>Сумма, ₽<input id="purchase-amount" inputmode="decimal" maxlength="14" required></label>
+          <label>Категория<input id="purchase-category" list="known-categories" maxlength="80" required></label>
+          <label>Магазин или место (необязательно)<input id="purchase-merchant" maxlength="120"></label>
+          <label>Какая карта использована<select id="purchase-card"><option value="">Не указана</option></select></label>
+          <button>Сохранить покупку</button>
+          <p id="purchase-status" role="status"></p>
+        </form>
+      </details>
+      <label>Отчёт за месяц<input id="spending-month" type="month" required></label>
+      <p id="spending-status" role="status"></p>
+      <div id="spending-report" class="stack"></div>
+    </div>
+  </section>
 
   <div class="management">
     <section class="panel stack" aria-labelledby="mine-heading">
@@ -92,6 +112,8 @@
         <form id="manual-form" class="stack">
           <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
           <label>Банк<input id="manual-bank" required maxlength="80"></label>
+          <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
+          <label>Уже начислено в этом месяце, ₽<input id="manual-monthly-used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
           <div id="manual-rules" class="stack"></div>
           <div class="actions">
             <button type="button" class="secondary" id="add-rule">Ещё категория</button>
@@ -128,6 +150,7 @@ let categories = {};
 let categoryGroups = {};
 let catalog = [];
 let saved = new Set();
+let catalogBalances = {};
 let manual = [];
 
 function element(tag, text, className) {
@@ -141,27 +164,28 @@ function monthlyForm(card) {
   const form = document.createElement('form');
   form.innerHTML = `<strong>Общий месячный лимит карты</strong>
     <p data-balance></p>
-    <label>Максимальный кэшбэк за месяц, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Без общего лимита"></label>
-    <label>Уже начислено в этом месяце, ₽<input name="used" inputmode="decimal" maxlength="14" required></label>
+    <label>Максимальный кэшбэк за месяц, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
+    <label>Уже начислено в этом месяце, ₽<input name="used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
     <button>Сохранить месячный лимит</button><p data-message role="status"></p>`;
   const capInput = form.elements.namedItem('cap'), usedInput = form.elements.namedItem('used');
   const balance = form.querySelector('[data-balance]'), message = form.querySelector('[data-message]');
   const monthly = card.monthly;
   const decimal = n => (n / 100).toLocaleString('ru-RU', {useGrouping:false, maximumFractionDigits:2});
   function showBalance() {
-    balance.textContent = `${monthly.month} (UTC) · ${monthly.remainingKopecks === null ? 'Общий лимит не задан' : `Доступно ${money(monthly.remainingKopecks)} из ${money(monthly.limitKopecks)}`}`;
-    if (monthly.remainingKopecks === 0) balance.textContent += ' · Карта исключена из рекомендаций';
+    const description = monthly.limitKopecks === null ? 'Общий лимит не задан; расчёт не учитывает месячный остаток'
+      : monthly.remainingKopecks === null ? `Остаток неизвестен; в расчёте полный лимит ${money(monthly.limitKopecks)}`
+      : `Известный остаток: ${money(monthly.remainingKopecks)} из ${money(monthly.limitKopecks)}`;
+    balance.textContent = `${monthly.month} (UTC) · ${description}`;
+    if (monthly.remainingKopecks === 0 || monthly.limitKopecks === 0) balance.textContent += ' · Карта исключена из рекомендаций';
   }
   capInput.value = monthly.limitKopecks === null ? '' : decimal(monthly.limitKopecks);
-  usedInput.value = decimal(monthly.usedKopecks);
+  usedInput.value = monthly.usedKopecks === null ? '' : decimal(monthly.usedKopecks);
   showBalance();
   form.onsubmit = async event => {
     event.preventDefault();
     if (busy || authBusy) return;
-    const cap = capInput.value.trim(), usedKopecks = fixed(usedInput.value);
-    const limitKopecks = cap ? fixed(cap) : null;
-    if (!(usedKopecks >= 0 && usedKopecks <= 10**12) ||
-        (cap && !(limitKopecks >= 0 && limitKopecks <= 10**12))) {
+    const limitKopecks = optionalAmount(capInput), usedKopecks = optionalAmount(usedInput);
+    if ([limitKopecks, usedKopecks].some(Number.isNaN)) {
       message.textContent = 'Укажите неотрицательные суммы до 10 млрд ₽ с точностью до копейки.';
       return;
     }
@@ -169,10 +193,11 @@ function monthlyForm(card) {
     busy = button.disabled = true;
     compareEnabled();
     try {
-      await api(`/api/me/manual-cards/${encodeURIComponent(card.cardId)}/monthly-limit`,
+      const route = card.cardName ? 'cards' : 'manual-cards';
+      await api(`/api/me/${route}/${encodeURIComponent(card.cardId)}/monthly-limit`,
         {method:'PUT', body:{month:monthly.month, limitKopecks, usedKopecks}});
       Object.assign(monthly, {limitKopecks, usedKopecks,
-        remainingKopecks:limitKopecks === null ? null : Math.max(0, limitKopecks - usedKopecks)});
+        remainingKopecks:limitKopecks === null || usedKopecks === null ? null : Math.max(0, limitKopecks - usedKopecks)});
       showBalance();
       clearResults();
       message.textContent = 'Сохранено.';
@@ -190,6 +215,12 @@ function monthlyForm(card) {
 function fixed(text) {
   const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.trim());
   return match ? Number(match[1]) * 100 + Number((match[2] || '').padEnd(2, '0')) : NaN;
+}
+
+function optionalAmount(input) {
+  if (!input.value.trim()) return null;
+  const value = fixed(input.value);
+  return value >= 0 && value <= 10**12 ? value : NaN;
 }
 
 async function api(path, {method = 'GET', body, timeout = 8000} = {}) {
@@ -323,7 +354,7 @@ function renderCatalog() {
 
 function renderCards() {
   const entries = catalog.filter(card => saved.has(card.cardId)).map(card =>
-    cardListing(card, cardAction(card, 'Удалить', '/api/me/cards/', 'DELETE', 'my-list'))
+    cardListing({...card, monthly:catalogBalances[card.cardId]}, cardAction(card, 'Удалить', '/api/me/cards/', 'DELETE', 'my-list'))
   );
   for (const card of manual) {
     entries.push(cardListing(card, cardAction(card, 'Удалить', '/api/me/manual-cards/', 'DELETE', 'my-list')));
@@ -342,14 +373,20 @@ async function updateCards(change, completion = '') {
   $('cards-status').textContent = change ? 'Сохраняем…' : 'Загружаем карты…';
   try {
     if (change) await change();
-    const [groups, products, ids, personal] = await Promise.all([
-      api('/api/category-groups'), api('/api/cards'), api('/api/me/cards'), api('/api/me/manual-cards')
+    const [groups, products, ids, personal, balances] = await Promise.all([
+      api('/api/category-groups'), api('/api/cards'), api('/api/me/cards'), api('/api/me/manual-cards'), api('/api/me/catalog-monthly')
     ]);
     categoryGroups = groups;
     categories = Object.assign({}, ...Object.values(groups));
     catalog = products;
     saved = new Set(ids);
     manual = personal;
+    catalogBalances = balances;
+    const purchaseCard = $('purchase-card'), previousCard = purchaseCard.value;
+    purchaseCard.replaceChildren(new Option('Не указана', ''), ...[
+      ...manual, ...catalog.filter(card => saved.has(card.cardId))
+    ].map(card => new Option(card.cardName || card.name, card.cardId)));
+    if ([...purchaseCard.options].some(option => option.value === previousCard)) purchaseCard.value = previousCard;
     dataReady = true;
     renderCards();
     $('cards-status').textContent = completion ||
@@ -384,6 +421,9 @@ async function loadAccount() {
     $('account-status').textContent = username ? `Вы вошли: ${username}` : 'Гостевой режим. Войдите, чтобы видеть карты на других устройствах.';
     $('account-form').hidden = Boolean(username);
     $('logout').hidden = !username;
+    $('spending-guest').hidden = Boolean(username);
+    $('spending-content').hidden = !username;
+    if (username) await loadSpending();
   } catch {
     $('account-status').textContent = 'Не удалось проверить вход. Обновите страницу.';
   }
@@ -526,6 +566,12 @@ $('manual-form').onsubmit = async event => {
   if (busy || authBusy || !dataReady) return;
   const name = $('manual-name').value.trim(), rules = [];
   const bankName = $('manual-bank').value.trim();
+  const monthlyLimitKopecks = optionalAmount($('manual-monthly-cap'));
+  const monthlyUsedKopecks = optionalAmount($('manual-monthly-used'));
+  if ([monthlyLimitKopecks, monthlyUsedKopecks].some(Number.isNaN)) {
+    $('manual-status').textContent = 'Укажите неотрицательные суммы до 10 млрд ₽ с точностью до копейки.';
+    return;
+  }
   if (!name || !bankName) {
     $('manual-status').textContent = 'Укажите название карты и банк.';
     return;
@@ -554,7 +600,7 @@ $('manual-form').onsubmit = async event => {
   $('manual-status').textContent = '';
   await updateCards(async () => {
     try {
-      await api('/api/me/manual-cards', {method: 'POST', body: {name, bankName, rules}});
+      await api('/api/me/manual-cards', {method: 'POST', body: {name, bankName, rules, monthlyLimitKopecks, monthlyUsedKopecks}});
     } catch (error) {
       $('manual-status').textContent = error.message === 'HTTP 422'
         ? 'Проверьте условия. Категории на одной карте не должны повторяться.'
@@ -576,11 +622,16 @@ function resultCard(match, winner = false) {
   const details = element('details');
   details.append(element('summary', 'Условия'),
     element('p', ruleDetails(match), 'muted'));
+  const monthly = match.monthlyBalanceStatus === 'known' ? `Известный месячный остаток: ${money(match.monthlyRemainingKopecks)}`
+    : match.monthlyBalanceStatus === 'assumed_full' ? `Остаток неизвестен: использован полный лимит ${money(match.monthlyLimitKopecks)}`
+    : match.monthlyBalanceStatus === 'not_set' ? 'Общий лимит не задан; месячный остаток не учтён.'
+    : 'Личные лимиты каталога в этом расчёте не учитываются.';
   entry.append(
     element('h3', (winner ? 'Лучший выбор · ' : '') + match.cardName),
     element('p', money(match.cashbackKopecks) + ' кэшбэка', 'return'),
     element('p', match.bankName + ' · ' + rateAndLimit(match) +
-      (match.monthlyLimitApplied ? ' · ограничено месячным остатком ' + money(match.monthlyRemainingKopecks) : match.limitApplied ? ' · лимит категории сработал' : ''), 'muted'),
+      (match.monthlyLimitApplied ? ' · применён месячный лимит' : match.limitApplied ? ' · лимит категории сработал' : ''), 'muted'),
+    element('small', monthly),
     details
   );
   return entry;
@@ -635,11 +686,106 @@ $('calc').onsubmit = async event => {
       full.append(element('summary', 'Все подходящие карты (' + allMatches.length + ')'), list);
       $('results').append(full);
     }
-    $('results').append(element('small', scope === 'manual'
-      ? 'Месячный остаток учитывается для личных карт, если задан. Расчёт не списывает остаток.'
-      : 'Условия каталога учебные. Месячный остаток учитывается для личных карт, если задан. Расчёт не списывает остаток.'));
+    $('results').append(element('small', scope === 'all'
+      ? 'Условия каталога учебные. Личные лимиты в этом режиме не учитываются.' : 'Расчёт не списывает остаток.'));
   } catch {
     if (current === version) $('status').textContent = 'Не удалось получить расчёт. Попробуйте ещё раз.';
+  }
+};
+
+const utcToday = new Date().toISOString().slice(0, 10);
+$('purchase-date').value = $('purchase-date').max = utcToday;
+$('spending-month').value = $('spending-month').max = utcToday.slice(0, 7);
+let reportVersion = 0;
+
+async function loadSpending() {
+  const current = ++reportVersion, month = $('spending-month').value;
+  const target = $('spending-report'), status = $('spending-status');
+  target.replaceChildren();
+  status.textContent = month ? 'Загружаем отчёт…' : 'Выберите месяц.';
+  if (!month) return;
+  try {
+    const report = await api('/api/me/spending?month=' + encodeURIComponent(month));
+    if (current !== reportVersion) return;
+    status.textContent = report.count ? '' : 'За этот месяц пока нет покупок.';
+    if (!report.count) return;
+    const largest = report.largestPurchase;
+    target.append(element('h3', 'Всего: ' + money(report.totalKopecks)),
+      element('p', `Покупок: ${report.count}. Крупнейшая: ${money(largest.amountKopecks)} — ${largest.merchant || largest.categoryName}, ${largest.date}.`));
+    for (const [title, items, amount] of [
+      ['Расходы по категориям', report.byCategory, 'amountKopecks'],
+      ['Расходы по магазинам', report.byMerchant, 'amountKopecks'],
+      ['Расходы по использованным картам', report.byUsedCard, 'amountKopecks'],
+      ['Какая карта дала бы больше кэшбэка', report.cardRanking, 'estimatedKopecks']
+    ]) {
+      const section = element('article', '', 'card'), list = element('ol');
+      section.append(element('h3', title));
+      for (const item of items) list.append(element('li', item.name + ' — ' + money(item[amount])));
+      section.append(items.length ? list : element('p', 'Нет данных.', 'muted'));
+      if (amount === 'estimatedKopecks') section.append(element('small',
+        'Оценка оплаты всех записанных покупок одной картой: по сохранённым условиям и общему лимиту за месяц. Это не начисления банка; незаписанные покупки не учитываются.'));
+      target.append(section);
+    }
+    const history = element('details', '', 'panel');
+    history.append(element('summary', 'Журнал покупок'));
+    for (const purchase of report.purchases) {
+      const row = element('div', '', 'card');
+      row.append(element('p', `${purchase.date} · ${purchase.merchant || 'Место не указано'} · ${purchase.categoryName} · ${money(purchase.amountKopecks)}${purchase.cardName ? ' · ' + purchase.cardName : ''}`));
+      const remove = element('button', 'Удалить', 'secondary');
+      remove.type = 'button';
+      remove.onclick = async () => {
+        if (!confirm('Удалить эту покупку из журнала?')) return;
+        remove.disabled = true;
+        try {
+          await api('/api/me/purchases/' + encodeURIComponent(purchase.id), {method:'DELETE'});
+          await loadSpending();
+        } catch {
+          status.textContent = 'Не удалось удалить покупку.';
+          remove.disabled = false;
+        }
+      };
+      row.append(remove);
+      history.append(row);
+    }
+    target.append(history);
+  } catch {
+    if (current === reportVersion) status.textContent = 'Не удалось загрузить отчёт. Проверьте вход или выберите месяц снова.';
+  }
+}
+$('spending-month').onchange = loadSpending;
+$('purchase-entry').ontoggle = () => {
+  if (!$('purchase-entry').open) return;
+  const category = $('category').selectedOptions[0];
+  if (!$('purchase-category').value && category?.value) $('purchase-category').value = category.textContent;
+  if (!$('purchase-amount').value) $('purchase-amount').value = $('amount').value;
+};
+$('purchase-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = $('purchase-form').querySelector('button'), status = $('purchase-status');
+  const date = $('purchase-date').value, amountKopecks = fixed($('purchase-amount').value);
+  if (button.disabled || authBusy) return;
+  if (!(amountKopecks > 0 && amountKopecks <= 10**12)) {
+    status.textContent = 'Введите сумму больше нуля, с точностью до копейки.';
+    return;
+  }
+  button.disabled = true;
+  status.textContent = 'Сохраняем…';
+  try {
+    await api('/api/me/purchases', {method:'POST', body:{date, amountKopecks,
+      categoryName:$('purchase-category').value, merchant:$('purchase-merchant').value,
+      cardId:$('purchase-card').value || null}});
+    $('purchase-form').reset();
+    $('purchase-date').value = utcToday;
+    $('purchase-entry').open = false;
+    $('purchase-entry').querySelector('summary').focus();
+    $('spending-month').value = date.slice(0, 7);
+    status.textContent = '';
+    await loadSpending();
+  } catch (error) {
+    status.textContent = error.message === 'HTTP 422'
+      ? 'Проверьте дату, категорию и выбранную карту.' : 'Не удалось сохранить покупку.';
+  } finally {
+    button.disabled = false;
   }
 };
 

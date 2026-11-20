@@ -39,7 +39,7 @@ class MonthlyLimits(unittest.TestCase):
         self.clock.now.return_value = datetime(2026, 12, 1, tzinfo=UTC)
         self.assertEqual(self.update(300000).status_code, 409)
         card, = self.client.get('/api/me/manual-cards').json()
-        self.assertEqual(card['monthly'], dict(month='2026-12', limitKopecks=300000, usedKopecks=0, remainingKopecks=300000))
+        self.assertEqual(card['monthly'], dict(month='2026-12', limitKopecks=300000, usedKopecks=None, remainingKopecks=None))
         self.assertEqual(self.ranking('Такси')[0]['cashbackKopecks'], 20000)
 
     def test_owner_and_valid_amount(self):
@@ -48,6 +48,33 @@ class MonthlyLimits(unittest.TestCase):
         with TestClient(create_app(self.db)) as stranger:
             self.assertEqual(self.update(300000, client=stranger).status_code, 404)
         self.assertEqual(self.client.get('/api/me/manual-cards').json()[0]['monthly']['usedKopecks'], 10000)
+
+    def test_limit_at_creation_distinguishes_unknown_from_zero(self):
+        response = self.client.post('/api/me/manual-cards', json={'name':'Новая', 'monthlyLimitKopecks':10000,
+            'rules':[{'categoryName':'Аптеки','rateBps':1000}]})
+        self.assertEqual(response.status_code, 201)
+        match, = self.ranking('Аптеки')
+        self.assertEqual((match['cashbackKopecks'], match['monthlyBalanceStatus']), (10000, 'assumed_full'))
+        endpoint = f"/api/me/manual-cards/{response.json()['cardId']}/monthly-limit"
+        self.assertEqual(self.client.put(endpoint, json=dict(month='2026-11', limitKopecks=10000, usedKopecks=0)).status_code, 204)
+        self.assertEqual(self.ranking('Аптеки')[0]['monthlyBalanceStatus'], 'known')
+
+    def test_saved_catalog_overrides_are_private_and_never_change_public_catalog(self):
+        self.assertEqual(self.client.put('/api/me/cards/B').status_code, 204)
+        endpoint = '/api/me/cards/B/monthly-limit'
+        data = dict(month='2026-11', limitKopecks=300000, usedKopecks=295000)
+        self.assertEqual(self.client.put(endpoint, json=data).status_code, 204)
+        self.assertEqual(self.client.get('/api/me/catalog-monthly').json()['B']['remainingKopecks'], 5000)
+        query = dict(categoryId='supermarkets', amountKopecks=250000)
+        self.assertEqual(self.client.post('/api/recommendations', json=dict(query, scope='mine')).json()['top3'][0]['cashbackKopecks'], 5000)
+        with TestClient(create_app(self.db)) as stranger:
+            self.assertEqual(stranger.put(endpoint, json=data).status_code, 404)
+            self.assertEqual(stranger.get('/api/me/catalog-monthly').json(), {})
+        self.assertEqual(self.client.put(endpoint, json=dict(data, usedKopecks=300000)).status_code, 204)
+        result = self.client.post('/api/recommendations', json=dict(query, scope='mine')).json()
+        self.assertEqual(result['top3'], [])
+        self.assertNotEqual(result['catalogSuggestion']['cardId'], 'B')
+        self.assertEqual(self.client.post('/api/recommendations', json=dict(query, scope='all')).json()['top3'][0]['cashbackKopecks'], 15000)
 
     def test_monthly_usage_transfers_to_account_and_survives_reopen(self):
         self.assertEqual(self.update(290000).status_code, 204)

@@ -72,6 +72,20 @@ def setup(db):
           FOREIGN KEY(owner, card_id) REFERENCES manual_cards(session, card_id)
             ON UPDATE CASCADE ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS purchases (
+          id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id),
+          day TEXT NOT NULL, category TEXT NOT NULL, merchant TEXT NOT NULL,
+          amount INTEGER NOT NULL CHECK(amount BETWEEN 1 AND 1000000000000),
+          used_card TEXT, estimates TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS purchases_account_day ON purchases(account_id, day);
+        CREATE TABLE IF NOT EXISTS catalog_monthly_usage (
+          owner TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
+          used INTEGER NOT NULL CHECK(used BETWEEN 0 AND 1000000000000),
+          PRIMARY KEY(owner, card_id, month),
+          FOREIGN KEY(owner, card_id) REFERENCES saved(session, cardId)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
     ''')
     db.execute('BEGIN IMMEDIATE')
     columns = {col[1] for col in db.execute('PRAGMA table_info(manual_cards)')}
@@ -79,6 +93,8 @@ def setup(db):
         db.execute("ALTER TABLE manual_cards ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''")
     if 'monthly_limit' not in columns:
         db.execute('ALTER TABLE manual_cards ADD COLUMN monthly_limit INTEGER CHECK(monthly_limit BETWEEN 0 AND 1000000000000)')
+    if not any(col[1] == 'monthly_limit' for col in db.execute('PRAGMA table_info(saved)')):
+        db.execute('ALTER TABLE saved ADD COLUMN monthly_limit INTEGER CHECK(monthly_limit BETWEEN 0 AND 1000000000000)')
     db.commit()
 
 
