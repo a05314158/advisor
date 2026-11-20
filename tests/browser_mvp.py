@@ -40,6 +40,9 @@ def check(base, chromium=None):
             response = page.request.post(base + '/api/auth/register', data=credentials)
             assert response.status == 201, response.text()
             page.reload()
+            page.get_by_text('Условия реальных карт', exact=True).click()
+            expect(page.locator('#product-list article')).to_have_count(3)
+            page.get_by_text('Условия реальных карт', exact=True).click()
             form = page.locator('#manual-form')
             page.get_by_text('Добавить карту', exact=True).click()
             total = page.get_by_role('button', name=re.compile(r'Все банки \(\d{3}\)'))
@@ -63,7 +66,7 @@ def check(base, chromium=None):
             expect(page.locator('.bank-tile')).to_have_count(1)
             page.get_by_role('button', name='Т‑Банк', exact=True).click()
             expect(form.get_by_label('Название карты (без номера)')).to_be_hidden()
-            expect(form.get_by_text('Black', exact=True)).to_be_visible()
+            expect(form.get_by_text('Пример продукта: Black', exact=True)).to_be_visible()
             expect(form.get_by_role('link', name='Официальные условия')).to_have_attribute(
                 'href', re.compile(r'^https://www\.tbank\.ru/bank/help/'))
 
@@ -167,7 +170,7 @@ def check(base, chromium=None):
             expect(accrued).to_have_value('0')
             accrued.fill('75,25')
             page.get_by_role('button', name='Сохранить начисление').click()
-            expect(page.get_by_text(re.compile(r'Начислено по введённым данным: 75,25'))).to_be_visible()
+            expect(page.get_by_text(re.compile(r'Фактический кэшбэк по покупкам этого месяца: 75,25'))).to_be_visible()
             assert len(requests) == 2 and requests[0] == requests[1]
             assert not errors, errors
         finally:

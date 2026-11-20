@@ -529,12 +529,12 @@ function renderBankChoices() {
     : query ? 'Найдено банков: ' + list.length : '';
 }
 
-function productConditions(profile) {
+function productConditions(profile, example = false) {
   const link = element('a', 'Официальные условия');
   link.href = profile.source;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
-  return [element('strong', profile.product), element('p', profile.note), link,
+  return [element('strong', example ? 'Пример продукта: ' + profile.product : profile.product), element('p', profile.note), link,
     element('small', 'Проверено ' + profile.checkedOn.split('-').reverse().join('.') +
       '. Ставку и лимит укажите по своим условиям.')];
 }
@@ -543,7 +543,7 @@ function showBankProduct(name) {
   const profile = cardProfiles.find(card => card.bankName === name);
   const product = $('bank-product');
   product.hidden = !profile;
-  product.replaceChildren(...(profile ? productConditions(profile) : []));
+  product.replaceChildren(...(profile ? productConditions(profile, true) : []));
 }
 
 async function loadProducts() {
@@ -905,7 +905,7 @@ async function loadSpending(openHistory = false, drafts = new Map()) {
     target.append(element('h3', 'Всего: ' + money(report.totalKopecks)),
       element('p', `Покупок: ${report.count}. Крупнейшая: ${money(largest.amountKopecks)} — ${largest.merchant || largest.categoryName}, ${largest.date}.`));
     target.append(element('p', report.actualCashbackCount
-      ? 'Начислено по введённым данным: ' + money(report.actualCashbackKopecks) +
+      ? 'Фактический кэшбэк по покупкам этого месяца: ' + money(report.actualCashbackKopecks) +
         ' · заполнено покупок: ' + report.actualCashbackCount + ' из ' + report.count
       : 'Начисления пока не указаны.'));
     for (const [title, items, amount] of [
