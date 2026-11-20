@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from catalog import CATEGORIES, CATEGORY_GROUPS, SEED, connect, initialize, rows
 from nearby import MAX_ACCURACY_METRES, search_places, within
 PAGE = Path(__file__).with_name('index.html')
+BUILD_REVISION = '$Format:%H$'
 CATEGORY_IDS = {label.casefold(): category_id for category_id, label in CATEGORIES.items()}
 CATEGORY_IDS['кафе и рестораны'] = 'cafe'
 
@@ -84,7 +85,10 @@ def create_app(db_path):
     def health():
         with connect(db_path) as db:
             db.execute('SELECT 1 FROM rules LIMIT 1').fetchone()
-        return {'status': 'ok'}
+        status = {'status': 'ok'}
+        if re.fullmatch(r'[0-9a-f]{40}', BUILD_REVISION):
+            status['revision'] = BUILD_REVISION
+        return status
 
     @app.get('/api/categories')
     def categories():
