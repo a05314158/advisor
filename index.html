@@ -122,6 +122,7 @@
             <strong id="chosen-bank"></strong>
             <button type="button" class="secondary" id="change-bank">Сменить банк</button>
           </div>
+          <div id="bank-product" class="card" hidden></div>
           <label id="manual-bank-label" hidden>Название банка<input id="manual-bank" maxlength="80" required></label>
           <label id="manual-name-label">Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
           <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
@@ -172,6 +173,14 @@ const featuredBanks = [
   {registrationNumber:'3542', name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
   {registrationNumber:'3027', name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
 ];
+const cardProfiles = {
+  'Т‑Банк': {product:'Black', source:'https://www.tbank.ru/bank/help/debit-cards/tinkoff-black/earn-with-card/cashback-intro/',
+    note:'Категории выбираются в банке. Обычная оплата через СБП не даёт карточного кэшбэка.'},
+  'Альфа‑Банк': {product:'Альфа‑Карта', source:'https://alfabank.ru/everyday/debit-cards/alfacard/',
+    note:'Категории выбираются ежемесячно. Ставку возьмите из Альфа‑Онлайн.'},
+  'ВТБ': {product:'Дебетовая карта ВТБ', source:'https://www.vtb.ru/personal/karty/debetovye/s-keshbekom/',
+    note:'Доступные категории и условия согласуйте с тем, что показано у вас в ВТБ Онлайн.'}
+};
 let bankDirectory = featuredBanks;
 let bankLimit = featuredBanks.length;
 let bankDirectoryState = 'loading';
@@ -526,6 +535,18 @@ function selectBank(name) {
   $('bank-picker').hidden = true;
   $('manual-form').hidden = false;
   $('chosen-bank').textContent = name || 'Другой банк';
+  const profile = cardProfiles[name];
+  const product = $('bank-product');
+  product.hidden = !profile;
+  product.replaceChildren();
+  if (profile) {
+    const link = element('a', 'Официальные условия');
+    link.href = profile.source;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    product.append(element('strong', profile.product), element('p', profile.note), link,
+      element('small', 'Источник проверен 20.11.2026. Ставку и лимит укажите по своим условиям.'));
+  }
   $('manual-bank-label').hidden = Boolean(name);
   $('manual-bank').readOnly = Boolean(name);
   $('manual-bank').value = name || '';

@@ -63,6 +63,10 @@ def check(base, chromium=None):
             expect(page.locator('.bank-tile')).to_have_count(1)
             page.get_by_role('button', name='Т‑Банк', exact=True).click()
             expect(form.get_by_label('Название карты (без номера)')).to_be_hidden()
+            expect(form.get_by_text('Black', exact=True)).to_be_visible()
+            expect(form.get_by_role('link', name='Официальные условия')).to_have_attribute(
+                'href', re.compile(r'^https://www\.tbank\.ru/bank/help/'))
+
             expect(form.get_by_label('Категория', exact=True)).to_be_focused()
             form.get_by_label('Общий лимит кэшбэка за месяц, ₽').fill('3000')
             form.get_by_label('Уже начислено в этом месяце, ₽').fill('2880')
