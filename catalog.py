@@ -18,6 +18,7 @@ FIELDS = tuple(SEED[0])
 def connect(path):
     db = sqlite3.connect(path)
     try:
+        db.execute('PRAGMA foreign_keys = ON')
         with db:
             yield db
     finally:
@@ -39,7 +40,28 @@ def setup(db):
           updated_on TEXT NOT NULL, rules_json TEXT NOT NULL,
           PRIMARY KEY(session, card_id)
         );
+        CREATE TABLE IF NOT EXISTS accounts (
+          id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt BLOB NOT NULL, password_hash BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          digest BLOB PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
+        CREATE TABLE IF NOT EXISTS monthly_usage (
+          owner TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
+          used INTEGER NOT NULL CHECK(used BETWEEN 0 AND 1000000000000),
+          PRIMARY KEY(owner, card_id, month),
+          FOREIGN KEY(owner, card_id) REFERENCES manual_cards(session, card_id)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
     ''')
+    db.execute('BEGIN IMMEDIATE')
+    columns = {col[1] for col in db.execute('PRAGMA table_info(manual_cards)')}
+    if 'bank_name' not in columns:
+        db.execute("ALTER TABLE manual_cards ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''")
+    if 'monthly_limit' not in columns:
+        db.execute('ALTER TABLE manual_cards ADD COLUMN monthly_limit INTEGER CHECK(monthly_limit BETWEEN 0 AND 1000000000000)')
+    db.commit()
 
 
 def rows(db):
