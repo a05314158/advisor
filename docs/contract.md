@@ -19,7 +19,7 @@
 `POST /api/recommendations`, тело: `{"categoryId":"supermarkets","amountKopecks":250000,"scope":"all"}`. `scope` = `all`, `mine` или `manual`. В последнем режиме `categoryId` содержит название ручной категории. `catalogVersion` относится только к общему справочнику и его названиям. Ответ 200: объект с `asOf` (ISO-дата), `catalogVersion`, `top3` и `allMatches` (массивы одинаково устроенных позиций). Пример одной позиции:
 
 ```json
-{"cardId":"B","bankName":"Учебный банк B","cardName":"Карта B","categoryId":"supermarkets","cashbackKopecks":15000,"rateBps":600,"limitKopecks":30000,"limitApplied":false,"minAmountKopecks":1,"validFrom":"2026-11-01","validUntilExclusive":"2027-11-01","updatedOn":"2026-11-01"}
+{"cardId":"B","bankName":"Учебный банк B","cardName":"Карта B","categoryId":"supermarkets","cashbackKopecks":15000,"calculation":{"amountKopecks":250000,"beforeLimitsKopecks":15000,"afterCategoryLimitKopecks":15000},"rateBps":600,"limitKopecks":30000,"limitApplied":false,"minAmountKopecks":1,"validFrom":"2026-11-01","validUntilExclusive":"2027-11-01","updatedOn":"2026-11-01"}
 ```
 
 При нулевой сумме: 422, `{"field":"amountKopecks","code":"positive_integer_required"}`. Пустая известная категория — 200 и два пустых массива. Неизвестная категория — 422 с полем categoryId. Ошибка сервера не равна пустому результату. Рубли форматирует UI, второй калькулятор на клиенте не нужен.
@@ -31,3 +31,7 @@
 `PATCH /api/me/manual-cards/{id}/rate` принимает `{"categoryName":"Такси","rateBps":300}` и возвращает 204. Меняется ставка указанного правила. Период, остальные правила, идентификатор карты и начисления за месяц сохраняются. 404 означает отсутствие карты у текущего владельца или указанного правила, 409 — неоднозначное совпадение старых названий, 422 — недопустимую ставку или категорию.
 
 При записи покупки через `POST /api/me/purchases` клиент может передать `Idempotency-Key` (16–128 ASCII букв, цифр, дефисов или подчёркиваний). Повтор с тем же ключом и данными возвращает исходный ID в рамках аккаунта, даже если покупку успели удалить. Тот же ключ с изменёнными данными возвращает 409. Для отдельной покупки нужен новый ключ.
+
+В каждом результате `calculation` содержит сумму покупки, округлённый возврат по ставке до ограничений и возврат после лимита на покупку. Итоговый `cashbackKopecks` учитывает применимые личные месячные ограничения.
+
+`GET /api/me/spending` возвращает для каждой покупки `cashbackComparison`: `usedCardCashbackKopecks`, `bestCardName`, `bestCashbackKopecks`, `differenceKopecks`. Сравнение использует сохранённые оценки по одной операции с лимитом на покупку. Месячный остаток не восстанавливается. `null` означает, что подходящей альтернативы или сохранённой оценки нет. Сохранённая нулевая оценка возвращается как `0` и отличается от отсутствия данных.

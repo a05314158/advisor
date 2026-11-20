@@ -71,3 +71,43 @@ class SpendingTests(unittest.TestCase):
                 self.assertEqual(client.delete(url + '/' + first.json()['id']).status_code, 204)
                 self.assertEqual(client.post(url, json=body, headers=headers).json(), first.json())
                 self.assertEqual(client.get('/api/me/spending').json()['count'], 1)
+
+    def test_purchase_comparison_distinguishes_zero_from_unknown_and_keeps_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder, patch('advisor.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 20, tzinfo=UTC)
+            with TestClient(create_app(Path(folder) / 'test.db')) as client:
+                credentials = {'username':'comparison.test','password':'test-only-long-password'}
+                self.assertEqual(client.post('/api/auth/register', json=credentials).status_code, 201)
+                cases = [
+                    ('12%', {'rateBps':1200,'limitKopecks':12000}),
+                    ('8%', {'rateBps':800,'limitKopecks':18000}),
+                    ('0%', {'rateBps':0}),
+                    ('Нет условий', {'rateBps':100,'validFrom':'2026-11-21'}),
+                ]
+                cards = {}
+                for name, terms in cases:
+                    response = client.post('/api/me/manual-cards', json={
+                        'name':name,'monthlyLimitKopecks':10000,'monthlyUsedKopecks':10000,
+                        'rules':[dict(terms, categoryName='Такси')],
+                    })
+                    self.assertEqual(response.status_code, 201)
+                    cards[name] = response.json()['cardId']
+                purchases = {}
+                for name in [*cards, None]:
+                    response = client.post('/api/me/purchases', json={
+                        'date':'2026-11-20','categoryName':'Такси',
+                        'amountKopecks':250000,'cardId':cards.get(name),
+                    })
+                    self.assertEqual(response.status_code, 201)
+                    purchases[name] = response.json()['id']
+                endpoint = '/api/me/spending?month=2026-11'
+                first = client.get(endpoint).json()
+                entries = {row['id']:row['cashbackComparison'] for row in first['purchases']}
+                for name, used, diff in [('12%',12000,6000), ('8%',18000,0), ('0%',0,18000),
+                                        ('Нет условий',None,None), (None,None,None)]:
+                    self.assertEqual(entries[purchases[name]], dict(usedCardCashbackKopecks=used,
+                                     bestCardName='8%', bestCashbackKopecks=18000, differenceKopecks=diff))
+                path = '/api/me/manual-cards/' + cards['8%']
+                self.assertEqual(client.patch(path + '/rate', json={'categoryName':'Такси','rateBps':100}).status_code, 204)
+                self.assertEqual(client.delete(path).status_code, 204)
+                self.assertEqual(client.get(endpoint).json(), first)

@@ -29,6 +29,8 @@ def check(base, chromium=None):
             card_a = page.locator('#results article', has_text='Карта A').first
             card_a.get_by_text('Условия', exact=True).click()
             expect(card_a.get_by_text(re.compile(r'Действует с'))).to_be_visible()
+            expect(card_a.get_by_text('Как рассчитан кэшбэк')).to_be_visible()
+            expect(card_a.get_by_text(re.compile(r'После лимита на покупку: 100'))).to_be_visible()
             category.select_option('cafe')
             page.locator('#compare').click()
             expect(page.locator('#results h3').first).to_have_text(re.compile(r'Карта D$'))
@@ -57,6 +59,10 @@ def check(base, chromium=None):
             page.locator('#compare').click()
             expect(page.locator('#results > article')).to_have_count(3)
             expect(page.locator('#results h3').first).to_have_text(re.compile(r'Вторая$'))
+            page.get_by_role('button', name='Записать эту покупку').click()
+            expect(page.locator('#purchase-amount')).to_have_value('2500')
+            expect(page.locator('#purchase-category')).to_have_value('Такси')
+            expect(page.locator('#purchase-card')).to_have_value('')
             page.reload()
             expect(card.get_by_text(re.compile(r'Такси.*3%'))).to_be_visible()
             card.get_by_text('Месячный лимит', exact=True).click()
@@ -76,12 +82,16 @@ def check(base, chromium=None):
             page.locator('#purchase-entry summary').click()
             page.locator('#purchase-amount').fill('2500')
             page.locator('#purchase-category').fill('Такси')
+            page.locator('#purchase-card').select_option(label='Первая')
             page.locator('#purchase-form button').click()
             expect(page.locator('#purchase-status')).to_have_text('Не удалось сохранить покупку.')
             page.locator('#purchase-form button').click()
             expect(page.locator('#purchase-status')).to_have_text('')
             report = page.request.get(base + '/api/me/spending').json()
             assert (report['count'], report['totalKopecks']) == (1, 250000), report
+            assert report['purchases'][0]['cashbackComparison']['differenceKopecks'] == 2500
+            page.get_by_text('Журнал покупок', exact=True).click()
+            expect(page.get_by_text(re.compile(r'Можно было бы вернуть на 25'))).to_be_visible()
             assert len(requests) == 2 and requests[0] == requests[1]
             assert not errors, errors
         finally:

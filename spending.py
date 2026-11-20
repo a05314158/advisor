@@ -10,20 +10,36 @@ from accounts import account
 from catalog import connect
 
 
+def compare_purchase(card, estimates):
+    best = min((item for item in estimates if item['cashbackKopecks'] > 0),
+               key=lambda item: (-item['cashbackKopecks'], item['cardId']), default=None)
+    used = next((item['cashbackKopecks'] for item in estimates if item['cardId'] == card['id']), None) if card else None
+    return dict(
+        usedCardCashbackKopecks=used,
+        bestCardName=best['name'] if best else None,
+        bestCashbackKopecks=best['cashbackKopecks'] if best else None,
+        differenceKopecks=best['cashbackKopecks'] - used if best and used is not None else None,
+    )
+
+
 def summarize(month, records):
     purchases, totals, caps = [], {}, {}
     groups = {'byCategory': {}, 'byMerchant': {}, 'byUsedCard': {}}
     for id_, day, category, merchant, amount, used, estimates in records:
         card = json.loads(used) if used else None
+        options = json.loads(estimates)
         purchases.append(dict(id=id_, date=day, categoryName=category, merchant=merchant,
-                              amountKopecks=amount, cardName=card['name'] if card else None))
+                              amountKopecks=amount, cardName=card['name'] if card else None,
+                              cashbackComparison=compare_purchase(card, options)))
         for group, key, label in [('byCategory', category.casefold(), category),
                                   ('byMerchant', merchant.casefold(), merchant),
                                   ('byUsedCard', card['id'] if card else None, card['name'] if card else '')]:
             if label:
                 entry = groups[group].setdefault(key, dict(name=label, amountKopecks=0))
                 entry['amountKopecks'] += amount
-        for estimate in json.loads(estimates):
+        for estimate in options:
+            if estimate['cashbackKopecks'] <= 0:
+                continue
             key = estimate['cardId']
             entry = totals.setdefault(key, dict(cardId=key, name=estimate['name'], estimatedKopecks=0))
             entry['estimatedKopecks'] += estimate['cashbackKopecks']

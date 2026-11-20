@@ -38,10 +38,13 @@ def recommend(category: str, amount: int, day: date, rules=None, own=None, *, ca
         monthly = rule.get('monthlyLimitKopecks') if remaining is None else remaining
         if monthly == 0:
             continue
-        match = {**card_info(card), **rule, 'cashbackKopecks': cashback,
-                 'limitApplied': cap is not None and raw > cap}
+        final = cashback if monthly is None else min(cashback, monthly)
+        match = {**card_info(card), **rule, 'cashbackKopecks': final,
+                 'limitApplied': cap is not None and raw > cap,
+                 'calculation': dict(amountKopecks=amount, beforeLimitsKopecks=raw,
+                                     afterCategoryLimitKopecks=cashback)}
         if monthly is not None:
-            match.update(cashbackKopecks=min(cashback, monthly), monthlyLimitApplied=cashback > monthly)
+            match['monthlyLimitApplied'] = final < cashback
         matches.append(match)
     matches.sort(key=lambda x: (-x['cashbackKopecks'], x['cardId']))
     ranked = []
@@ -448,13 +451,10 @@ def create_app(db_path):
                 names[card_id] = card_info(card_id, rule)['cardName']
                 if rule['categoryId'] == category_id:
                     candidates.append({**rule, 'categoryId':key})
-        estimates = {}
-        for match in recommend(key, amount, day, candidates)['allMatches']:
-            card_id = match['cardId']
-            if card_id not in estimates and match['cashbackKopecks'] > 0:
-                estimates[card_id] = dict(cardId=card_id, name=match['cardName'],
-                    cashbackKopecks=match['cashbackKopecks'], monthlyCapKopecks=caps.get(card_id))
-        return names, list(estimates.values())
+        estimates = [dict(cardId=match['cardId'], name=match['cardName'],
+                          cashbackKopecks=match['cashbackKopecks'], monthlyCapKopecks=caps.get(match['cardId']))
+                     for match in recommend(key, amount, day, candidates)['allMatches']]
+        return names, estimates
 
     mount_spending(app, db_path, lambda: datetime.now(UTC).date(), category_label, iso_day, spending_cards)
     return app

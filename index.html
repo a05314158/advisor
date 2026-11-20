@@ -562,6 +562,15 @@ function resultCard(match, winner = false) {
   const details = element('details');
   details.append(element('summary', 'Условия'),
     element('p', ruleDetails(match), 'muted'));
+  const {amountKopecks, beforeLimitsKopecks, afterCategoryLimitKopecks} = match.calculation;
+  const steps = element('ol');
+  steps.append(element('li', money(amountKopecks) + ' × ' + match.rateBps / 100 +
+    '% = ' + money(beforeLimitsKopecks) + ' после округления до копеек'));
+  if (match.limitApplied) steps.append(element('li',
+    'После лимита на покупку: ' + money(afterCategoryLimitKopecks)));
+  if (match.monthlyLimitApplied) steps.append(element('li',
+    'После месячного лимита: ' + money(match.cashbackKopecks)));
+  details.append(element('h4', 'Как рассчитан кэшбэк'), steps);
   const monthly = match.monthlyBalanceStatus === 'known' ? `Известный месячный остаток: ${money(match.monthlyRemainingKopecks)}`
     : match.monthlyBalanceStatus === 'assumed_full' ? `Остаток неизвестен: использован полный лимит ${money(match.monthlyLimitKopecks)}`
     : match.monthlyBalanceStatus === 'not_set' ? 'Общий лимит не задан; месячный остаток не учтён.'
@@ -577,6 +586,22 @@ function resultCard(match, winner = false) {
   return entry;
 }
 
+function purchaseAction(amount, category) {
+  const button = element('button', 'Записать эту покупку', 'secondary');
+  button.type = 'button';
+  button.onclick = () => {
+    $('purchase-date').value = new Date().toISOString().slice(0, 10);
+    $('purchase-amount').value = amount;
+    $('purchase-category').value = category;
+    $('purchase-merchant').value = '';
+    $('purchase-card').value = '';
+    $('purchase-status').textContent = '';
+    $('purchase-entry').open = true;
+    $('purchase-amount').focus();
+  };
+  return button;
+}
+
 $('calc').oninput = clearResults;
 $('calc').onsubmit = async event => {
   event.preventDefault();
@@ -590,6 +615,8 @@ $('calc').onsubmit = async event => {
     return;
   }
   const selected = $('category').value;
+  const categoryName = $('category').selectedOptions[0].textContent;
+  const amountText = $('amount').value;
   const custom = selected.startsWith('manual:');
   const categoryId = custom ? selected.slice('manual:'.length) : selected;
   const scope = custom ? 'manual' : $('scope').value;
@@ -614,6 +641,7 @@ $('calc').onsubmit = async event => {
           $('results').append(element('p', 'В каталоге тоже нет карт с кэшбэком за эту покупку.', 'muted'));
         }
       }
+      if (!$('spending-content').hidden) $('results').append(purchaseAction(amountText, categoryName));
       return;
     }
     $('status').textContent = 'Лучший выбор — ' + top3[0].cardName +
@@ -628,6 +656,7 @@ $('calc').onsubmit = async event => {
     }
     $('results').append(element('small', scope === 'all'
       ? 'Условия каталога учебные. Личные лимиты в этом режиме не учитываются.' : 'Расчёт не списывает остаток.'));
+    if (!$('spending-content').hidden) $('results').append(purchaseAction(amountText, categoryName));
   } catch {
     if (current === version) $('status').textContent = 'Не удалось получить расчёт. Попробуйте ещё раз.';
   }
@@ -667,10 +696,25 @@ async function loadSpending() {
       target.append(section);
     }
     const history = element('details', '', 'panel');
-    history.append(element('summary', 'Журнал покупок'));
+    history.append(element('summary', 'Журнал покупок'), element('small',
+      'Сравнение для каждой покупки отдельно, по сохранённым условиям. Месячный остаток не учитывается.'));
     for (const purchase of report.purchases) {
       const row = element('div', '', 'card');
       row.append(element('p', `${purchase.date} · ${purchase.merchant || 'Место не указано'} · ${purchase.categoryName} · ${money(purchase.amountKopecks)}${purchase.cardName ? ' · ' + purchase.cardName : ''}`));
+      const {usedCardCashbackKopecks, bestCardName, bestCashbackKopecks, differenceKopecks} = purchase.cashbackComparison;
+      if (usedCardCashbackKopecks !== null) {
+        row.append(element('p', 'По использованной карте: ' + money(usedCardCashbackKopecks)));
+      } else if (purchase.cardName) {
+        row.append(element('p', 'Для использованной карты нет сохранённого расчёта.', 'muted'));
+      }
+      if (bestCardName && (differenceKopecks === null || differenceKopecks > 0)) {
+        row.append(element('p', 'Лучший вариант: ' + bestCardName + ' · ' + money(bestCashbackKopecks)));
+      }
+      if (differenceKopecks > 0) {
+        row.append(element('p', 'Можно было бы вернуть на ' + money(differenceKopecks) + ' больше.'));
+      } else if (differenceKopecks === 0) {
+        row.append(element('p', 'Использованная карта дала бы максимальный возврат.'));
+      }
       const remove = element('button', 'Удалить', 'secondary');
       remove.type = 'button';
       remove.onclick = async () => {
