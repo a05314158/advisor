@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Советник — выбор карты</title>
+<style>*{box-sizing:border-box}body{font:1rem/1.55 system-ui;color:#182b27;background:#eff4ef;margin:0}main{max-width:38rem;margin:auto;padding:1.3rem}form,article{background:white;padding:1rem;border-radius:.6rem;margin:.55rem 0}label{display:block;font-weight:600}input,select,button{font:inherit;padding:.6rem;width:100%;margin:.25rem 0 .8rem}button{background:#155540;color:white;border:0;border-radius:.3rem;cursor:pointer}h1{margin-bottom:0}h3{margin:0}summary{cursor:pointer}</style>
+<main><h1>Какой картой заплатить?</h1><p>Сравните ожидаемый кэшбэк до оплаты.</p>
+<form id="calc"><label for="category">Категория</label><select id="category"><option value="supermarkets">Супермаркеты</option><option value="cafe">Кафе</option><option value="fuel">АЗС</option></select><label for="amount">Сумма покупки, ₽</label><input id="amount" inputmode="decimal" value="2500" maxlength="13" required><button>Сравнить карты</button></form>
+<label for="scope">Какие карты сравнить</label><select id="scope"><option value="all">Все карты</option><option value="mine">Мои карты</option></select>
+<form id="manual-form"><h2>Ввести карту вручную</h2><label for="manual-name">Название карты (без номера)</label><input id="manual-name" required maxlength="80"><p>Заполните процент для нужных категорий. Пустой лимит — без лимита.</p><div id="manual-rules"></div><button>Сохранить карту</button><p id="manual-status" role="status"></p></form><div id="manual-list"></div>
+<p id="status" role="status"></p><section id="results"></section><small>Учебные условия. Оценка предполагает, что месячный лимит ещё не использован.</small>
+<details><summary>Настроить «Мои карты»</summary><p id="saved-status" role="status"></p><div id="saved"></div><button id="reload" type="button">Обновить список</button></details></main>
+<script>
+const $ = id => document.getElementById(id);
+const money = n => (n/100).toLocaleString('ru-RU',{style:'currency',currency:'RUB'});
+let version=0;
+function clear(){version++;$('results').replaceChildren();$('status').textContent='';}
+$('calc').oninput=clear;
+ $('scope').onchange=clear;
+async function api(path, options={}) {
+  const response=await fetch(path,{...options,signal:AbortSignal.timeout(8000)});
+  if (!response.ok) throw new Error(response.status===422?'Проверьте сумму: больше нуля и не более 10 млрд ₽.':'Запрос не выполнен. Попробуйте ещё раз.');
+  return response.status===204?null:response.json();
+}
+let saving=false;
+async function loadSaved(change) {
+  if (saving) return;
+  saving=true;
+  $('saved').replaceChildren();
+  $('reload').disabled=true;
+  $('saved-status').textContent='Загрузка…';
+  try {
+    if (change) { clear(); await api(`/api/me/${change.manual?'manual-cards':'cards'}/${encodeURIComponent(change.id)}`,{method:change.method}); }
+    const [catalog,mine,manual]=await Promise.all([api('/api/cards'),api('/api/me/cards'),api('/api/me/manual-cards')]);
+    $('manual-list').replaceChildren();
+    for (const x of manual) {
+      const entry=document.createElement('article');
+      const button=document.createElement('button');
+      button.textContent='Удалить карту';
+      button.onclick=()=>loadSaved({id:x.cardId,method:'DELETE',manual:true});
+      entry.append(`${x.name}: ${x.rules.map(r=>`${categories[r.categoryId]} — ${r.rateBps/100}%${r.limitKopecks===null?'':`, лимит ${money(r.limitKopecks)}`}`).join('; ')}`,button);
+      $('manual-list').append(entry);
+    }
+    $('saved-status').textContent=mine.length?`Сохранено карт: ${mine.length}`:'Нет сохранённых карт. Добавьте карты из справочника.';
+    for (const x of catalog) {
+      const button=document.createElement('button');
+      const has=mine.includes(x.cardId);
+      button.textContent=`${has?'Удалить':'Добавить'}: ${x.cardName} · ${x.bankName}`;
+      button.onclick=()=>loadSaved({id:x.cardId,method:has?'DELETE':'PUT'});
+      $('saved').append(button);
+    }
+  } catch { $('saved-status').textContent='Не удалось обновить список. Повторите запрос.'; }
+  finally { saving=false; $('reload').disabled=false; }
+}
+const categories=Object.fromEntries(Array.from($('category').options, o=>[o.value,o.textContent]));
+for (const [id,label] of Object.entries(categories)) {
+  const row=document.createElement('fieldset');
+  row.innerHTML=`<legend>${label}</legend><label for="rate-${id}">Кэшбэк, %</label><input id="rate-${id}" inputmode="decimal" maxlength="6"><label for="cap-${id}">Лимит, ₽ (необязательно)</label><input id="cap-${id}" inputmode="decimal" maxlength="14">`;
+  $('manual-rules').append(row);
+}
+$('manual-form').onsubmit=async e=>{
+  e.preventDefault();
+  if(saving) return;
+  const name=$('manual-name').value.trim(), rules=[];
+  const fixed=text=>{const m=/^(\d+)(?:[.,](\d{1,2}))?$/.exec(text);return m?Number(m[1])*100+Number((m[2]||'').padEnd(2,'0')):NaN;};
+  for(const [id,label] of Object.entries(categories)){
+    const rate=$(`rate-${id}`).value.trim(), cap=$(`cap-${id}`).value.trim();
+    if(!rate&&!cap) continue;
+    const rateBps=fixed(rate), limitKopecks=cap?fixed(cap):null;
+    if(!(rateBps>=0&&rateBps<=10000)||(cap&&!(limitKopecks>=0&&limitKopecks<=10**12))){$('manual-status').textContent=`${label}: укажите процент от 0 до 100 и корректный лимит (до двух знаков после запятой).`;return;}
+    rules.push({categoryId:id,rateBps,limitKopecks});
+  }
+  if(!name||!rules.length){$('manual-status').textContent='Введите название и хотя бы один процент кэшбэка.';return;}
+  saving=true;
+  const button=e.currentTarget.querySelector('button');
+  button.disabled=true;
+  $('manual-status').textContent='Сохраняем…';
+  try{
+    await api('/api/me/manual-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,rules})});
+    $('manual-form').reset(); $('scope').value='mine'; clear();
+    $('manual-status').textContent='Карта сохранена. Нажмите «Сравнить карты» для расчёта.';
+  }catch{$('manual-status').textContent='Не удалось сохранить карту. Проверьте данные и повторите.';return;}
+  finally{button.disabled=false;saving=false;}
+  await loadSaved();
+};
+$('reload').onclick=()=>loadSaved();
+loadSaved();
+function card(x){const item=document.createElement('article'),title=document.createElement('h3'),details=document.createElement('details'),summary=document.createElement('summary');title.textContent=`${money(x.cashbackKopecks)} · ${x.cardName}`;summary.textContent=`${x.rateBps/100}% · ${x.limitKopecks===null?'без лимита':`лимит ${money(x.limitKopecks)}${x.limitApplied?' сработал':''}`}`;details.append(summary,`${x.bankName}. От ${money(x.minAmountKopecks)}. Период: с ${x.validFrom} ${x.validUntilExclusive?`до ${x.validUntilExclusive} (не включая)`:'без указанной даты окончания'}.`);item.append(title,details,`Условия от ${x.updatedOn}`);return item;}
+$('calc').onsubmit=async e=>{e.preventDefault();clear();const v=version, match=/^(\d+)(?:[.,](\d{1,2}))?$/.exec($('amount').value.trim());if(!match){$('status').textContent='Введите сумму в рублях, не более двух знаков после запятой.';return;}
+const amountKopecks=Number(match[1])*100+Number((match[2]||'').padEnd(2,'0'));$('status').textContent='Сравниваем карты…';
+try{const data=await api('/api/recommendations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categoryId:$('category').value,amountKopecks,scope:$('scope').value})});if(v!==version)return;$('status').textContent=data.top3.length?'Лучшие карты по возврату':'Нет подходящих карт для этой покупки.';$('results').append(...data.top3.map(card));if(data.allMatches.length>data.top3.length){const list=document.createElement('details'),s=document.createElement('summary');s.textContent=`Все подходящие карты (${data.allMatches.length})`;list.append(s,...data.allMatches.map(card));$('results').append(list);}}
+catch(err){if(v===version)$('status').textContent=err instanceof TypeError?'Нет связи с сервером. Повторите расчёт.':err.message;}};
+</script></html>
