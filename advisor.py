@@ -7,11 +7,15 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
-from catalog import CATEGORIES, SEED, connect, initialize, rows
+from catalog import CATEGORIES, CATEGORY_GROUPS, SEED, connect, initialize, rows
+from nearby import MAX_ACCURACY_METRES, search_places, within
 PAGE = Path(__file__).with_name('index.html')
+CATEGORY_IDS = {label.casefold(): category_id for category_id, label in CATEGORIES.items()}
+CATEGORY_IDS['кафе и рестораны'] = 'cafe'
 
 
 
@@ -81,6 +85,34 @@ def create_app(db_path):
         with connect(db_path) as db:
             db.execute('SELECT 1 FROM rules LIMIT 1').fetchone()
         return {'status': 'ok'}
+
+    @app.get('/api/categories')
+    def categories():
+        return CATEGORIES
+
+    @app.get('/api/category-groups')
+    def category_groups():
+        return CATEGORY_GROUPS
+
+    @app.get('/api/nearby')
+    def nearby_config():
+        return {'available': bool(os.environ.get('ADVISOR_2GIS_KEY'))}
+
+    @app.post('/api/nearby')
+    def nearby(body: dict):
+        lat, lon, accuracy = body.get('latitude'), body.get('longitude'), body.get('accuracy')
+        if not (within(lat, -90, 90) and within(lon, -180, 180) and within(accuracy, 0, 1000000)):
+            return JSONResponse({'code': 'invalid_location'}, 422)
+        if accuracy > MAX_ACCURACY_METRES:
+            return {'status': 'low_accuracy', 'places': []}
+        key = os.environ.get('ADVISOR_2GIS_KEY')
+        if not key:
+            return {'status': 'not_configured', 'places': []}
+        try:
+            places = search_places(key, lat, lon, accuracy)
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+            return {'status': 'unavailable', 'places': []}
+        return {'status': 'ok', 'places': places}
 
     @app.get('/api/cards')
     def cards(categoryId: str | None = None):
@@ -201,17 +233,28 @@ def create_app(db_path):
             return JSONResponse({'field': 'scope', 'code': 'unknown_scope'}, 422)
         with connect(db_path) as db:
             db.execute('BEGIN')
-            rules = [] if scope == 'manual' else rows(db)
+            catalog_rules = [] if scope == 'manual' else rows(db)
+            rules = list(catalog_rules)
             own = set() if scope == 'manual' else set(saved(db, request)) if scope == 'mine' else None
             if own is not None:
                 for card in manual_cards(db, request):
                     own.add(card['cardId'])
-                    rules.extend({**rule, 'categoryId': rule['categoryKey'] if scope == 'manual' else rule['categoryId'],
-                                  'cardId': card['cardId'], 'cardName': card['name'],
-                                  'bankName': 'Введено вручную', 'minAmountKopecks': 1,
-                                  'validFrom': card['updatedOn'], 'updatedOn': card['updatedOn'],
-                                  'validUntilExclusive': None} for rule in card['rules'])
-        return recommend(category, amount, datetime.now(UTC).date(), rules, own)
+                    for rule in card['rules']:
+                        key = rule['categoryKey']
+                        category_id = key if scope == 'manual' else CATEGORY_IDS.get(key, f'manual:{key}')
+                        rules.append({**rule, 'categoryId': category_id,
+                                      'cardId': card['cardId'], 'cardName': card['name'],
+                                      'bankName': 'Введено вручную', 'minAmountKopecks': 1,
+                                      'validFrom': card['updatedOn'], 'updatedOn': card['updatedOn'],
+                                      'validUntilExclusive': None})
+        day = datetime.now(UTC).date()
+        result = recommend(category, amount, day, rules, own)
+        if scope == 'mine' and not any(card['cashbackKopecks'] > 0 for card in result['top3']):
+            unowned = {rule['cardId'] for rule in catalog_rules} - own
+            alternatives = recommend(category, amount, day, catalog_rules, unowned)['top3']
+            if alternatives and alternatives[0]['cashbackKopecks'] > 0:
+                result['catalogSuggestion'] = alternatives[0]
+        return result
 
     return app
 

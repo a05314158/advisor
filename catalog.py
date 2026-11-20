@@ -5,7 +5,25 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-CATEGORIES = {'supermarkets': 'Супермаркеты', 'cafe': 'Кафе', 'fuel': 'АЗС'}
+CATEGORY_GROUPS = {
+    'Еда и покупки': {
+        'supermarkets': 'Супермаркеты', 'groceries': 'Продукты', 'cafe': 'Кафе',
+        'fast_food': 'Фастфуд', 'marketplaces': 'Маркетплейсы', 'alcohol': 'Алкоголь',
+    },
+    'Повседневные расходы и дом': {
+        'pharmacies': 'Аптеки', 'clothes': 'Одежда и обувь', 'home': 'Дом и ремонт',
+        'pets': 'Животные', 'books': 'Книги', 'flowers': 'Цветы', 'kids': 'Детские товары',
+    },
+    'Дорога и поездки': {
+        'fuel': 'АЗС', 'taxi': 'Такси', 'car_sharing': 'Каршеринг', 'transport': 'Транспорт',
+        'tickets': 'Авиа- и ж/д билеты', 'hotels': 'Отели',
+    },
+    'Досуг и уход': {
+        'beauty': 'Красота', 'entertainment': 'Развлечения', 'cinema': 'Кино',
+        'sports': 'Спорттовары и тренировки', 'subscriptions': 'Подписки', 'digital': 'Цифровые товары',
+    },
+}
+CATEGORIES = {category_id: label for group in CATEGORY_GROUPS.values() for category_id, label in group.items()}
 SEED = [dict(cardId=c, categoryId=k, rateBps=r, limitKopecks=l, minAmountKopecks=m,
              validFrom='2026-11-01', validUntilExclusive='2027-11-01', updatedOn='2026-11-01')
         for c,k,r,l,m in [('A','supermarkets',1000,10000,1), ('B','supermarkets',600,30000,1),

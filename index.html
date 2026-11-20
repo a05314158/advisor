@@ -1,111 +1,425 @@
 <!doctype html>
 <html lang="ru">
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Советник — выбор карты</title>
-<style>*{box-sizing:border-box}body{font:1rem/1.55 system-ui;color:#182b27;background:#eff4ef;margin:0}main{max-width:38rem;margin:auto;padding:1.3rem}form,article{background:white;padding:1rem;border-radius:.6rem;margin:.55rem 0;overflow-wrap:anywhere}label{display:block;font-weight:600}fieldset{min-inline-size:0}input,select,button{font:inherit;padding:.6rem;width:100%;margin:.25rem 0 .8rem}button{background:#155540;color:white;border:0;border-radius:.3rem;cursor:pointer}button:disabled{opacity:.6}</style>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Советник — выбор карты</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eff4ef; color: #182b27; font: 1rem/1.5 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 40rem); margin: 2rem auto 3rem; }
+    h1, h2, h3, p { margin: 0; overflow-wrap: anywhere; }
+    h1 { font-size: clamp(1.85rem, 6vw, 2.5rem); line-height: 1.12; margin-bottom: 1rem; }
+    h2 { font-size: 1.2rem; }
+    h3 { font-size: 1rem; }
+    .panel, .card { background: white; border: 1px solid #d2ded6; border-radius: .8rem; padding: 1rem; }
+    .panel + .panel, #results:not(:empty), .management { margin-top: .85rem; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    input, select, button { font: inherit; min-height: 44px; }
+    input, select { width: 100%; min-width: 0; border: 1px solid #677f72; border-radius: .45rem; padding: .45rem .65rem; background: white; color: inherit; }
+    button { border: 1px solid #155540; border-radius: .45rem; padding: .45rem .8rem; background: #155540; color: white; cursor: pointer; }
+    button.secondary { background: white; color: #155540; }
+    button:disabled { opacity: .65; cursor: default; }
+    :focus-visible { outline: 2px solid #155540; outline-offset: 3px; }
+    .stack { display: grid; gap: .7rem; }
+    .fields { display: grid; gap: .65rem; }
+    @media (min-width: 32rem) { .fields { grid-template-columns: 1.4fr 1fr; } }
+    .card { display: grid; gap: .5rem; overflow-wrap: anywhere; }
+    .card button { justify-self: start; }
+    .winner { background: #e0f1e7; border-color: #7caa94; }
+    .return { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .winner .return { font-size: 1.75rem; }
+    .muted, small { color: #4b6257; }
+    p[role=status]:empty { margin: 0; }
+    #status:not(:empty) { margin-top: .6rem; }
+    #nearby-list:not(:empty) { margin-top: .45rem; }
+    #geo-status:not(:empty) { margin-top: .35rem; }
+    summary { cursor: pointer; padding: .45rem 0; min-height: 44px; }
+    details > .stack { margin-top: .35rem; }
+    ul { margin: .35rem 0 0; padding-left: 1.15rem; }
+    fieldset { min-width: 0; margin: 0; border: 1px solid #d2ded6; border-radius: .55rem; padding: .75rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+  </style>
+</head>
+<body>
 <main>
-<h1>Какой картой заплатить?</h1>
-<form id="manual-form">
-  <h2>Ввести карту</h2>
-  <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
-  <p>Введите название категории и процент. Например: «Такси» — 7,5%.</p>
-  <div id="manual-rules"></div>
-  <button type="button" id="add-rule">Ещё категория</button>
-  <button id="save-card">Сохранить карту</button>
-  <p id="manual-status" role="status"></p>
-</form>
-<template id="rule-template"><fieldset>
-  <label>Категория<input name="category" required maxlength="80"></label>
-  <label>Кэшбэк, %<input name="rate" required inputmode="decimal" maxlength="6"></label>
-  <label>Лимит, ₽ (необязательно)<input name="cap" inputmode="decimal" maxlength="14"></label>
-  <button type="button" data-remove>Убрать строку</button>
-</fieldset></template>
-<h2>Мои карты</h2><div id="manual-list"></div><p id="cards-status" role="status"></p><button type="button" id="retry" hidden>Повторить загрузку</button>
-<form id="calc">
-  <h2>Сравнить карты</h2>
-  <label>Категория покупки<select id="category" required></select></label>
-  <label>Сумма покупки, ₽<input id="amount" inputmode="decimal" maxlength="14" required></label>
-  <button id="compare" disabled>Рассчитать кэшбэк</button>
-</form>
-<p id="status" role="status"></p><section id="results"></section>
+  <h1>Какой картой заплатить?</h1>
+  <form id="calc" class="panel stack">
+    <label>Какие карты сравнить
+      <select id="scope"><option value="all">Весь каталог</option><option value="mine">Мои карты</option></select>
+    </label>
+    <div class="fields">
+      <label>Категория покупки<select id="category" required><option value="">Выберите категорию</option></select></label>
+      <label>Сумма покупки, ₽<input id="amount" inputmode="decimal" maxlength="14" required></label>
+    </div>
+    <div>
+      <button type="button" class="secondary" id="locate" aria-describedby="geo-note">Найти магазин рядом</button>
+      <small id="geo-note">Для поиска приблизительные координаты передаются в 2ГИС.</small>
+      <p id="geo-status" class="muted" role="status"></p>
+      <div id="nearby-list" class="stack"></div>
+    </div>
+    <button id="compare" disabled>Рассчитать кэшбэк</button>
+  </form>
+  <p id="status" role="status"></p>
+  <section id="results" class="stack" aria-label="Результаты расчёта"></section>
+
+  <div class="management">
+    <section class="panel stack" aria-labelledby="mine-heading">
+      <h2 id="mine-heading">Мои карты</h2>
+      <p id="cards-status" role="status"></p>
+      <button type="button" class="secondary" id="retry" hidden>Повторить загрузку</button>
+      <div id="my-list" class="stack"></div>
+      <details id="catalog">
+        <summary>Добавить из каталога</summary>
+        <div class="stack">
+          <label>Категория в каталоге<select id="catalog-category"><option value="">Все категории</option></select></label>
+          <div id="catalog-list" class="stack"></div>
+        </div>
+      </details>
+      <details id="manual-entry">
+        <summary>Ввести карту вручную</summary>
+        <form id="manual-form" class="stack">
+          <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
+          <div id="manual-rules" class="stack"></div>
+          <div class="actions">
+            <button type="button" class="secondary" id="add-rule">Ещё категория</button>
+            <button id="save-card" disabled>Сохранить карту</button>
+          </div>
+          <p id="manual-status" role="status"></p>
+        </form>
+      </details>
+    </section>
+  </div>
+
+  <template id="rule-template">
+    <fieldset class="stack">
+      <label>Категория<input name="category" required maxlength="80" list="known-categories"></label>
+      <div class="fields">
+        <label>Кэшбэк, %<input name="rate" required inputmode="decimal" maxlength="6"></label>
+        <label>Лимит возврата, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Необязательно"></label>
+      </div>
+      <button type="button" class="secondary" data-remove>Убрать строку</button>
+    </fieldset>
+  </template>
+  <datalist id="known-categories"></datalist>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const money = n => (n / 100).toLocaleString('ru-RU', {style:'currency', currency:'RUB'});
+const money = n => (n / 100).toLocaleString('ru-RU', {style: 'currency', currency: 'RUB'});
 let version = 0;
-let loading = false;
-let writing = false;
+let busy = false;
+let dataReady = false;
+let categories = {};
+let categoryGroups = {};
+let catalog = [];
+let saved = new Set();
+let manual = [];
+
+function element(tag, text, className) {
+  const item = document.createElement(tag);
+  if (text) item.textContent = text;
+  if (className) item.className = className;
+  return item;
+}
 
 function fixed(text) {
-  const m = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.trim());
-  return m ? Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0')) : NaN;
+  const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.trim());
+  return match ? Number(match[1]) * 100 + Number((match[2] || '').padEnd(2, '0')) : NaN;
 }
+
+async function api(path, {method = 'GET', body} = {}) {
+  const request = {method, signal: AbortSignal.timeout(8000)};
+  if (body) {
+    request.headers = {'Content-Type': 'application/json'};
+    request.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, request);
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.status === 204 ? null : response.json();
+}
+
 function clearResults() {
   version++;
   $('results').replaceChildren();
   $('status').textContent = '';
 }
+
+function compareEnabled() {
+  $('compare').disabled = busy || !dataReady || !$('category').value;
+  $('save-card').disabled = busy || !dataReady;
+}
+
+function renderCategories() {
+  const filter = $('catalog-category');
+  const previousFilter = filter.value;
+  filter.replaceChildren(new Option('Все категории', ''));
+  $('known-categories').replaceChildren();
+  const select = $('category');
+  const previous = select.value;
+  const known = Object.entries(categories);
+  for (const [id, name] of known) {
+    filter.add(new Option(name, id));
+    $('known-categories').append(new Option(name, name));
+  }
+  if (Object.hasOwn(categories, previousFilter)) filter.value = previousFilter;
+  select.replaceChildren(new Option('Выберите категорию', ''));
+  for (const [name, group] of Object.entries(categoryGroups)) {
+    const options = document.createElement('optgroup');
+    options.label = name;
+    options.append(...Object.entries(group).map(([id, label]) => new Option(label, id)));
+    select.append(options);
+  }
+  if ($('scope').value === 'mine') {
+    const keys = new Set(known.map(([, name]) => name.toLowerCase()));
+    keys.add('кафе и рестораны');
+    for (const card of manual) {
+      for (const rule of card.rules) {
+        if (keys.has(rule.categoryKey)) continue;
+        select.add(new Option(rule.categoryName, 'manual:' + rule.categoryName));
+        keys.add(rule.categoryKey);
+      }
+    }
+  }
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  compareEnabled();
+}
+
+function ruleDetails(rule) {
+  const conditions = [
+    'От ' + money(rule.minAmountKopecks),
+    'Действует с ' + rule.validFrom,
+  ];
+  if (rule.validUntilExclusive) conditions.push('до ' + rule.validUntilExclusive + ' (не включая)');
+  conditions.push('Условия от ' + rule.updatedOn);
+  return conditions.join(' · ');
+}
+
+function rateAndLimit(rule) {
+  return rule.rateBps / 100 + '%' +
+    (rule.limitKopecks === null ? ' · лимит не задан' : ' · лимит ' + money(rule.limitKopecks));
+}
+
+function cardListing(card, action) {
+  const entry = element('article', '', 'card');
+  entry.append(element('h3', card.cardName || card.name));
+  if (card.bankName) entry.append(element('p', card.bankName, 'muted'));
+  if (card.rules.length) {
+    const list = element('ul');
+    for (const rule of card.rules) {
+      const name = rule.categoryName || categories[rule.categoryId];
+      const line = element('li', name + ' — ' + rateAndLimit(rule));
+      if (rule.validFrom) line.append(element('div', ruleDetails(rule), 'muted'));
+      list.append(line);
+    }
+    entry.append(list);
+  } else {
+    entry.append(element('p', 'Действующих условий нет.', 'muted'));
+  }
+  if (card.updatedOn) entry.append(element('small', 'Условия от ' + card.updatedOn));
+  if (action) entry.append(action);
+  return entry;
+}
+
+function cardAction(card, label, path, method, listId) {
+  const button = element('button', label, 'secondary');
+  button.type = 'button';
+  button.dataset.card = card.cardId;
+  button.setAttribute('aria-label', label + ': ' + (card.cardName || card.name));
+  button.onclick = async () => {
+    await updateCards(async () => {
+      await api(path + encodeURIComponent(card.cardId), {method});
+    });
+    const next = [...$(listId).querySelectorAll('button[data-card]')]
+      .find(item => item.dataset.card === card.cardId);
+    if (next) next.focus();
+    else if (listId === 'my-list' && !$('retry').hidden) $('retry').focus();
+    else if (listId === 'my-list') $('catalog').querySelector('summary').focus();
+  };
+  return button;
+}
+
+function renderCatalog() {
+  const category = $('catalog-category').value;
+  const entries = [];
+  for (const card of catalog) {
+    const rules = category ? card.rules.filter(rule => rule.categoryId === category) : card.rules;
+    if (category && !rules.length) continue;
+    const action = saved.has(card.cardId) ? 'Удалить' : 'Добавить';
+    const method = saved.has(card.cardId) ? 'DELETE' : 'PUT';
+    entries.push(cardListing({...card, rules}, cardAction(card, action, '/api/me/cards/', method, 'catalog-list')));
+  }
+  $('catalog-list').replaceChildren(...(entries.length ? entries : [element('p', 'Нет карт для этой категории.', 'muted')]));
+}
+
+function renderCards() {
+  const entries = catalog.filter(card => saved.has(card.cardId)).map(card =>
+    cardListing(card, cardAction(card, 'Удалить', '/api/me/cards/', 'DELETE', 'my-list'))
+  );
+  for (const card of manual) {
+    entries.push(cardListing(card, cardAction(card, 'Удалить', '/api/me/manual-cards/', 'DELETE', 'my-list')));
+  }
+  $('my-list').replaceChildren(...entries);
+  renderCategories();
+  renderCatalog();
+}
+
+async function updateCards(change, completion = '') {
+  if (busy) return;
+  busy = true;
+  compareEnabled();
+  if (change && $('scope').value === 'mine') clearResults();
+  $('retry').hidden = true;
+  $('cards-status').textContent = change ? 'Сохраняем…' : 'Загружаем карты…';
+  try {
+    if (change) await change();
+    const [groups, products, ids, personal] = await Promise.all([
+      api('/api/category-groups'), api('/api/cards'), api('/api/me/cards'), api('/api/me/manual-cards')
+    ]);
+    categoryGroups = groups;
+    categories = Object.assign({}, ...Object.values(groups));
+    catalog = products;
+    saved = new Set(ids);
+    manual = personal;
+    dataReady = true;
+    renderCards();
+    $('cards-status').textContent = completion ||
+      (saved.size || manual.length ? '' : 'Добавьте карту из каталога или введите свои условия.');
+  } catch (error) {
+    if (error.message === 'HTTP 422' && change) {
+      $('cards-status').textContent = '';
+    } else {
+      dataReady = false;
+      $('cards-status').textContent = 'Не удалось обновить карты. Повторите загрузку.';
+      $('retry').hidden = false;
+    }
+  } finally {
+    busy = false;
+    compareEnabled();
+  }
+}
+
 function addRow() {
   const row = $('rule-template').content.firstElementChild.cloneNode(true);
   row.querySelector('[data-remove]').onclick = () => {
     row.remove();
     if (!$('manual-rules').children.length) addRow();
+    $('manual-rules').lastElementChild.querySelector('input').focus();
   };
   $('manual-rules').append(row);
   return row;
 }
-async function api(path, body) {
-  const options = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
-  const response = await fetch(path, {...options, signal:AbortSignal.timeout(8000)});
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
-async function loadCards() {
-  if (loading) return;
-  loading = $('save-card').disabled = $('compare').disabled = true;
-  $('retry').hidden = true;
-  $('cards-status').textContent = 'Загружаем карты…';
-  try {
-    const cards = await api('/api/me/manual-cards');
-    const labels = new Map();
-    const entries = document.createDocumentFragment();
-    for (const card of cards) {
-      const entry = document.createElement('article');
-      const title = document.createElement('strong');
-      title.textContent = card.name;
-      const list = document.createElement('ul');
-      for (const rule of card.rules) {
-        if (!labels.has(rule.categoryKey)) labels.set(rule.categoryKey, rule.categoryName);
-        const line = document.createElement('li');
-        line.textContent = `${rule.categoryName} — ${rule.rateBps / 100}%${rule.limitKopecks === null ? '' : `, лимит ${money(rule.limitKopecks)}`}`;
-        list.append(line);
-      }
-      entry.append(title, list);
-      entries.append(entry);
-    }
-    $('manual-list').replaceChildren(entries);
-    const select = $('category'), previous = select.value;
-    select.replaceChildren();
-    for (const label of labels.values()) select.add(new Option(label, label));
-    if (!labels.size) select.add(new Option('Сначала сохраните карту', ''));
-    if ([...select.options].some(option => option.value === previous)) select.value = previous;
-    $('cards-status').textContent = cards.length ? '' : 'Пока нет карт.';
-    $('compare').disabled = !labels.size;
-  } catch {
-    $('cards-status').textContent = 'Не удалось загрузить карты.';
-    $('retry').hidden = false;
-  } finally {
-    loading = false;
-    $('save-card').disabled = writing;
-  }
-}
-$('retry').onclick = loadCards;
+
 $('add-rule').onclick = () => addRow().querySelector('input').focus();
-addRow();
+$('retry').onclick = () => updateCards();
+$('catalog-category').onchange = renderCatalog;
+$('scope').onchange = () => {
+  clearResults();
+  renderCategories();
+};
+
+const geolocationErrors = {
+  1: 'Нет доступа к геопозиции. Выберите категорию вручную.',
+  2: 'Устройство не определило геопозицию. Выберите категорию вручную.',
+  3: 'Поиск геопозиции занял слишком много времени. Выберите категорию вручную.',
+};
+const nearbyConfig = api('/api/nearby').catch(() => null);
+let locationRequest = 0;
+
+function showNearby(places, groups) {
+  const nearbyCategories = new Set(places.flatMap(place => place.categoryIds));
+  const suggestions = Object.entries(groups).filter(([, group]) =>
+    Object.keys(group).some(id => nearbyCategories.has(id))
+  );
+  if (!suggestions.length) {
+    $('geo-status').textContent = 'Подходящих мест рядом не найдено. Выберите категорию вручную.';
+    return;
+  }
+  $('geo-status').textContent = 'Группы по геопозиции. Уточните категорию покупки.';
+  for (const [name, group] of suggestions) {
+    const entry = element('details', '', 'card');
+    entry.open = suggestions.length === 1;
+    const choices = element('div', '', 'actions');
+    entry.append(element('summary', name), choices);
+    for (const [categoryId, label] of Object.entries(group)) {
+      const button = element('button', label, 'secondary');
+      button.type = 'button';
+      button.onclick = () => {
+        $('category').value = categoryId;
+        compareEnabled();
+        clearResults();
+        $('nearby-list').replaceChildren();
+        $('geo-status').textContent = 'Выбрано: ' + label;
+        $('amount').focus();
+      };
+      choices.append(button);
+    }
+    $('nearby-list').append(entry);
+  }
+  const all = element('button', 'Все категории', 'secondary');
+  all.type = 'button';
+  all.onclick = () => {
+    $('category').focus();
+    try { $('category').showPicker?.(); } catch { /* The select can still be opened manually. */ }
+  };
+  $('nearby-list').append(all, element('small', 'Рубрика места может отличаться от категории в банке.'));
+}
+
+$('category').onchange = () => {
+  compareEnabled();
+  locationRequest++;
+  $('locate').disabled = false;
+  $('geo-status').textContent = '';
+  $('nearby-list').replaceChildren();
+};
+
+$('locate').onclick = async () => {
+  const current = ++locationRequest;
+  $('locate').disabled = true;
+  $('nearby-list').replaceChildren();
+  $('geo-status').textContent = 'Проверяем доступность поиска…';
+  try {
+    const config = await nearbyConfig;
+    if (current !== locationRequest) return;
+    if (!config?.available || !navigator.geolocation || !window.isSecureContext) {
+      $('geo-status').textContent = 'Поиск по геопозиции недоступен. Выберите категорию вручную.';
+      return;
+    }
+    $('geo-status').textContent = 'Определяем геопозицию…';
+    const {coords} = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject,
+        {enableHighAccuracy: true, timeout: 6000, maximumAge: 0});
+    });
+    if (current !== locationRequest) return;
+    $('geo-status').textContent = 'Ищем магазины рядом…';
+    const [{status, places}, groups] = await Promise.all([
+      api('/api/nearby', {
+        method: 'POST', body: {latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy}
+      }),
+      Object.keys(categoryGroups).length ? categoryGroups : api('/api/category-groups')
+    ]);
+    if (current !== locationRequest) return;
+    if (status === 'low_accuracy') {
+      $('geo-status').textContent = 'Геопозиция слишком неточная. Выберите категорию вручную.';
+    } else if (status === 'ok') {
+      showNearby(places, groups);
+    } else {
+      $('geo-status').textContent = 'Справочник мест недоступен. Выберите категорию вручную.';
+    }
+  } catch (error) {
+    if (current === locationRequest) {
+      $('geo-status').textContent = geolocationErrors[error.code] ||
+        'Не удалось найти место. Выберите категорию вручную.';
+    }
+  } finally {
+    if (current === locationRequest) $('locate').disabled = false;
+  }
+};
+
 $('manual-form').onsubmit = async event => {
   event.preventDefault();
-  if (loading || writing) return;
-  const name = $('manual-name').value.trim(), rules = [];
+  if (busy || !dataReady) return;
+  const name = $('manual-name').value.trim();
+  const rules = [];
   for (const row of $('manual-rules').children) {
     const categoryName = row.querySelector('[name=category]').value.trim();
     const rateBps = fixed(row.querySelector('[name=rate]').value);
@@ -113,50 +427,105 @@ $('manual-form').onsubmit = async event => {
     const limitKopecks = cap ? fixed(cap) : null;
     if (!name || !categoryName || !(rateBps >= 0 && rateBps <= 10000) ||
         (cap && !(limitKopecks >= 0 && limitKopecks <= 10**12))) {
-      $('manual-status').textContent = 'Проверьте название, категории, проценты от 0 до 100 и необязательный лимит. До двух знаков после запятой.';
+      $('manual-status').textContent = 'Проверьте название, категорию, ставку и лимит. Для чисел допустимы два знака после запятой.';
       return;
     }
     rules.push({categoryName, rateBps, limitKopecks});
   }
-  writing = $('save-card').disabled = true;
-  $('manual-status').textContent = 'Сохраняем…';
-  try {
-    await api('/api/me/manual-cards', {name, rules});
+  $('manual-status').textContent = '';
+  await updateCards(async () => {
+    try {
+      await api('/api/me/manual-cards', {method: 'POST', body: {name, rules}});
+    } catch (error) {
+      $('manual-status').textContent = error.message === 'HTTP 422'
+        ? 'Проверьте условия. Категории на одной карте не должны повторяться.'
+        : 'Не удалось сохранить карту. Попробуйте ещё раз.';
+      throw error;
+    }
     $('manual-form').reset();
     $('manual-rules').replaceChildren();
     addRow();
+    $('scope').value = 'mine';
     clearResults();
-    $('manual-status').textContent = 'Карта сохранена.';
-    await loadCards();
-  } catch (error) {
-    $('manual-status').textContent = error.message === 'HTTP 422' ? 'Проверьте поля: категории на одной карте не должны повторяться.' : 'Не удалось сохранить карту.';
-  } finally {
-    writing = $('save-card').disabled = false;
-  }
+    $('manual-entry').open = false;
+    $('manual-entry').querySelector('summary').focus();
+  }, 'Карта сохранена.');
 };
+
+function resultCard(match, winner = false) {
+  const entry = element('article', '', winner ? 'card winner' : 'card');
+  const details = element('details');
+  details.append(element('summary', 'Условия'),
+    element('p', ruleDetails(match), 'muted'));
+  entry.append(
+    element('h3', (winner ? 'Лучший выбор · ' : '') + match.cardName),
+    element('p', money(match.cashbackKopecks) + ' кэшбэка', 'return'),
+    element('p', match.bankName + ' · ' + rateAndLimit(match) +
+      (match.limitApplied ? ' · лимит сработал' : ''), 'muted'),
+    details
+  );
+  return entry;
+}
+
 $('calc').oninput = clearResults;
 $('calc').onsubmit = async event => {
   event.preventDefault();
+  if ($('compare').disabled) return;
   clearResults();
-  const current = version, amountKopecks = fixed($('amount').value);
+  const current = version;
+  const amountKopecks = fixed($('amount').value);
   if (!(amountKopecks > 0 && amountKopecks <= 10**12)) {
-    $('status').textContent = 'Введите сумму больше нуля и не более 10 млрд ₽.';
+    $('status').textContent = 'Введите сумму больше нуля и не более 10 млрд ₽, до двух знаков после запятой.';
+    $('amount').focus();
     return;
   }
+  const selected = $('category').value;
+  const custom = selected.startsWith('manual:');
+  const categoryId = custom ? selected.slice('manual:'.length) : selected;
+  const scope = custom ? 'manual' : $('scope').value;
   $('status').textContent = 'Считаем…';
   try {
-    const data = await api('/api/recommendations', {categoryId:$('category').value, amountKopecks, scope:'manual'});
+    const {top3, allMatches, catalogSuggestion} = await api('/api/recommendations', {
+      method: 'POST', body: {categoryId, amountKopecks, scope}
+    });
     if (current !== version) return;
-    $('status').textContent = data.allMatches.length ? 'По ожидаемому кэшбэку:' : 'Нет карт с этой категорией.';
-    for (const match of data.allMatches) {
-      const entry = document.createElement('article');
-      entry.textContent = `${match.cardName} — ${money(match.cashbackKopecks)} (${match.rateBps / 100}%${match.limitApplied ? ', сработал лимит' : ''})`;
-      $('results').append(entry);
+    if (!top3.some(match => match.cashbackKopecks > 0)) {
+      if (scope === 'all') {
+        $('status').textContent = 'В каталоге нет карт с кэшбэком за эту покупку.';
+      } else {
+        $('status').textContent = saved.size || manual.length
+          ? 'По вашим картам нет кэшбэка за эту покупку.'
+          : 'У вас пока нет добавленных карт.';
+        if (catalogSuggestion) {
+          $('results').append(element('h2', 'Подходящая карта из каталога'),
+            resultCard(catalogSuggestion),
+            element('small', 'Учебная карта. Условия приведены для демонстрации.'));
+        } else {
+          $('results').append(element('p', 'В каталоге тоже нет карт с кэшбэком за эту покупку.', 'muted'));
+        }
+      }
+      return;
     }
+    $('status').textContent = 'Лучший выбор — ' + top3[0].cardName +
+      '. Ожидаемый кэшбэк ' + money(top3[0].cashbackKopecks) + '.';
+    $('results').append(...top3.map((match, index) => resultCard(match, index === 0)));
+    if (allMatches.length > top3.length) {
+      const full = element('details', '', 'panel');
+      const list = element('div', '', 'stack');
+      list.append(...allMatches.map(match => resultCard(match)));
+      full.append(element('summary', 'Все подходящие карты (' + allMatches.length + ')'), list);
+      $('results').append(full);
+    }
+    $('results').append(element('small', scope === 'manual'
+      ? 'Расчёт предполагает полный доступный лимит.'
+      : 'Условия каталога учебные. Расчёт предполагает полный доступный лимит.'));
   } catch {
     if (current === version) $('status').textContent = 'Не удалось получить расчёт. Попробуйте ещё раз.';
   }
 };
-loadCards();
+
+addRow();
+updateCards();
 </script>
+</body>
 </html>
