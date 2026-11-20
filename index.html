@@ -22,6 +22,7 @@
     button:disabled { opacity: .65; cursor: default; }
     :focus-visible { outline: 2px solid #155540; outline-offset: 3px; }
     .stack { display: grid; gap: .7rem; }
+    [hidden] { display: none !important; }
     .fields { display: grid; gap: .65rem; }
     @media (min-width: 32rem) { .fields { grid-template-columns: 1.4fr 1fr; } }
     .card { display: grid; gap: .5rem; overflow-wrap: anywhere; }
@@ -44,9 +45,19 @@
 <body>
 <main>
   <h1>Какой картой заплатить?</h1>
+<section class="panel stack" aria-label="Аккаунт">
+  <p id="account-status" role="status">Проверяем вход…</p>
+  <form id="account-form" class="stack" hidden>
+    <label>Логин (латиница, цифры, точка, дефис или подчёркивание)<input id="username" autocomplete="username" required minlength="3" maxlength="32"></label>
+    <label>Пароль (от 12 символов)<input id="password" type="password" required minlength="12" maxlength="128"></label>
+    <label>Перенести гостевые карты при регистрации <input id="transfer-guest" type="checkbox"></label>
+    <button type="submit" value="login">Войти</button><button type="submit" value="register">Зарегистрироваться</button>
+  </form>
+  <button type="button" id="logout" hidden>Выйти</button>
+</section>
   <form id="calc" class="panel stack">
     <label>Какие карты сравнить
-      <select id="scope"><option value="all">Весь каталог</option><option value="mine">Мои карты</option></select>
+      <select id="scope"><option value="mine">Мои карты</option><option value="all">Весь каталог</option></select>
     </label>
     <div class="fields">
       <label>Категория покупки<select id="category" required><option value="">Выберите категорию</option></select></label>
@@ -80,6 +91,7 @@
         <summary>Ввести карту вручную</summary>
         <form id="manual-form" class="stack">
           <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
+          <label>Банк<input id="manual-bank" required maxlength="80"></label>
           <div id="manual-rules" class="stack"></div>
           <div class="actions">
             <button type="button" class="secondary" id="add-rule">Ещё категория</button>
@@ -98,6 +110,9 @@
         <label>Кэшбэк, %<input name="rate" required inputmode="decimal" maxlength="6"></label>
         <label>Лимит возврата, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Необязательно"></label>
       </div>
+  <label>Минимальная сумма покупки, ₽<input name="minimum" inputmode="decimal" maxlength="14" placeholder="Без минимума"></label>
+  <label>Условия действуют с (пусто — с сегодняшнего дня)<input name="start" type="date"></label>
+  <label>До какой даты (не включая, необязательно)<input name="end" type="date"></label>
       <button type="button" class="secondary" data-remove>Убрать строку</button>
     </fieldset>
   </template>
@@ -122,13 +137,63 @@ function element(tag, text, className) {
   return item;
 }
 
+function monthlyForm(card) {
+  const form = document.createElement('form');
+  form.innerHTML = `<strong>Общий месячный лимит карты</strong>
+    <p data-balance></p>
+    <label>Максимальный кэшбэк за месяц, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Без общего лимита"></label>
+    <label>Уже начислено в этом месяце, ₽<input name="used" inputmode="decimal" maxlength="14" required></label>
+    <button>Сохранить месячный лимит</button><p data-message role="status"></p>`;
+  const capInput = form.elements.namedItem('cap'), usedInput = form.elements.namedItem('used');
+  const balance = form.querySelector('[data-balance]'), message = form.querySelector('[data-message]');
+  const monthly = card.monthly;
+  const decimal = n => (n / 100).toLocaleString('ru-RU', {useGrouping:false, maximumFractionDigits:2});
+  function showBalance() {
+    balance.textContent = `${monthly.month} (UTC) · ${monthly.remainingKopecks === null ? 'Общий лимит не задан' : `Доступно ${money(monthly.remainingKopecks)} из ${money(monthly.limitKopecks)}`}`;
+    if (monthly.remainingKopecks === 0) balance.textContent += ' · Карта исключена из рекомендаций';
+  }
+  capInput.value = monthly.limitKopecks === null ? '' : decimal(monthly.limitKopecks);
+  usedInput.value = decimal(monthly.usedKopecks);
+  showBalance();
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy || authBusy) return;
+    const cap = capInput.value.trim(), usedKopecks = fixed(usedInput.value);
+    const limitKopecks = cap ? fixed(cap) : null;
+    if (!(usedKopecks >= 0 && usedKopecks <= 10**12) ||
+        (cap && !(limitKopecks >= 0 && limitKopecks <= 10**12))) {
+      message.textContent = 'Укажите неотрицательные суммы до 10 млрд ₽ с точностью до копейки.';
+      return;
+    }
+    const button = form.querySelector('button');
+    busy = button.disabled = true;
+    compareEnabled();
+    try {
+      await api(`/api/me/manual-cards/${encodeURIComponent(card.cardId)}/monthly-limit`,
+        {method:'PUT', body:{month:monthly.month, limitKopecks, usedKopecks}});
+      Object.assign(monthly, {limitKopecks, usedKopecks,
+        remainingKopecks:limitKopecks === null ? null : Math.max(0, limitKopecks - usedKopecks)});
+      showBalance();
+      clearResults();
+      message.textContent = 'Сохранено.';
+    } catch (error) {
+      message.textContent = error.message === 'HTTP 409' ? 'Начался новый месяц. Обновите страницу и укажите сумму за новый месяц.' : 'Не удалось сохранить лимит.';
+    } finally {
+      busy = button.disabled = false;
+      compareEnabled();
+    }
+  };
+  return form;
+}
+
+
 function fixed(text) {
   const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.trim());
   return match ? Number(match[1]) * 100 + Number((match[2] || '').padEnd(2, '0')) : NaN;
 }
 
-async function api(path, {method = 'GET', body} = {}) {
-  const request = {method, signal: AbortSignal.timeout(8000)};
+async function api(path, {method = 'GET', body, timeout = 8000} = {}) {
+  const request = {method, signal: AbortSignal.timeout(timeout)};
   if (body) {
     request.headers = {'Content-Type': 'application/json'};
     request.body = JSON.stringify(body);
@@ -145,8 +210,8 @@ function clearResults() {
 }
 
 function compareEnabled() {
-  $('compare').disabled = busy || !dataReady || !$('category').value;
-  $('save-card').disabled = busy || !dataReady;
+  $('compare').disabled = busy || authBusy || !dataReady || !$('category').value;
+  $('save-card').disabled = busy || authBusy || !dataReady;
 }
 
 function renderCategories() {
@@ -216,6 +281,11 @@ function cardListing(card, action) {
     entry.append(element('p', 'Действующих условий нет.', 'muted'));
   }
   if (card.updatedOn) entry.append(element('small', 'Условия от ' + card.updatedOn));
+  if (card.monthly) {
+    const monthly = element('details');
+    monthly.append(element('summary', 'Месячный лимит'), monthlyForm(card));
+    entry.append(monthly);
+  }
   if (action) entry.append(action);
   return entry;
 }
@@ -308,7 +378,43 @@ function addRow() {
   $('manual-rules').append(row);
   return row;
 }
-
+async function loadAccount() {
+  try {
+    const {username} = await api('/api/auth/me');
+    $('account-status').textContent = username ? `Вы вошли: ${username}` : 'Гостевой режим. Войдите, чтобы видеть карты на других устройствах.';
+    $('account-form').hidden = Boolean(username);
+    $('logout').hidden = !username;
+  } catch {
+    $('account-status').textContent = 'Не удалось проверить вход. Обновите страницу.';
+  }
+}
+let authBusy = false;
+async function changeAccount(path, payload) {
+  if (authBusy || busy) return;
+  authBusy = $('save-card').disabled = true;
+  try {
+    await api(`/api/auth/${path}`, {method:'POST', body:payload, timeout:30000});
+    $('password').value = '';
+    location.reload();
+  } catch (error) {
+    let message = 'Не удалось выполнить действие. Попробуйте снова.';
+    if (error.message === 'HTTP 401') message = 'Неверный логин или пароль.';
+    if (error.message === 'HTTP 429') message = 'Слишком много попыток. Подождите минуту.';
+    if (error.message === 'HTTP 409') message = 'Логин занят или вход уже выполнен.';
+    if (error.message === 'HTTP 422') message = 'Проверьте формат логина и длину пароля.';
+    $('account-status').textContent = message;
+    authBusy = false;
+    compareEnabled();
+  }
+}
+$('account-form').onsubmit = event => {
+  event.preventDefault();
+  const action = event.submitter?.value || 'login';
+  const payload = {username:$('username').value, password:$('password').value};
+  if (action === 'register') payload.transferGuestCards = $('transfer-guest').checked;
+  changeAccount(action, payload);
+};
+$('logout').onclick = () => changeAccount('logout', {});
 $('add-rule').onclick = () => addRow().querySelector('input').focus();
 $('retry').onclick = () => updateCards();
 $('catalog-category').onchange = renderCatalog;
@@ -417,25 +523,38 @@ $('locate').onclick = async () => {
 
 $('manual-form').onsubmit = async event => {
   event.preventDefault();
-  if (busy || !dataReady) return;
-  const name = $('manual-name').value.trim();
-  const rules = [];
+  if (busy || authBusy || !dataReady) return;
+  const name = $('manual-name').value.trim(), rules = [];
+  const bankName = $('manual-bank').value.trim();
+  if (!name || !bankName) {
+    $('manual-status').textContent = 'Укажите название карты и банк.';
+    return;
+  }
   for (const row of $('manual-rules').children) {
     const categoryName = row.querySelector('[name=category]').value.trim();
     const rateBps = fixed(row.querySelector('[name=rate]').value);
     const cap = row.querySelector('[name=cap]').value.trim();
     const limitKopecks = cap ? fixed(cap) : null;
-    if (!name || !categoryName || !(rateBps >= 0 && rateBps <= 10000) ||
-        (cap && !(limitKopecks >= 0 && limitKopecks <= 10**12))) {
-      $('manual-status').textContent = 'Проверьте название, категорию, ставку и лимит. Для чисел допустимы два знака после запятой.';
+    const minimum = row.querySelector('[name=minimum]').value.trim();
+    const minAmountKopecks = minimum ? fixed(minimum) : 0;
+    const start = row.querySelector('[name=start]').value;
+    const end = row.querySelector('[name=end]').value;
+    const problem = !categoryName ? 'укажите название категории.'
+      : !(rateBps >= 0 && rateBps <= 10000) ? 'кэшбэк должен быть от 0 до 100%, не более двух знаков после запятой.'
+      : !(minAmountKopecks >= 0 && minAmountKopecks <= 10**12) ? 'минимальная сумма должна быть от 0 до 10 млрд ₽, с точностью до копейки.'
+      : cap && !(limitKopecks >= 0 && limitKopecks <= 10**12) ? 'лимит должен быть от 0 до 10 млрд ₽, с точностью до копейки.'
+      : start && end && end <= start ? 'дата окончания должна быть позже даты начала.' : '';
+    if (problem) {
+      $('manual-status').textContent = `Строка ${rules.length + 1}: ${problem}`;
       return;
     }
-    rules.push({categoryName, rateBps, limitKopecks});
+    rules.push({categoryName, rateBps, limitKopecks, minAmountKopecks,
+      ...(start ? {validFrom:start} : {}), validUntilExclusive:end || null});
   }
   $('manual-status').textContent = '';
   await updateCards(async () => {
     try {
-      await api('/api/me/manual-cards', {method: 'POST', body: {name, rules}});
+      await api('/api/me/manual-cards', {method: 'POST', body: {name, bankName, rules}});
     } catch (error) {
       $('manual-status').textContent = error.message === 'HTTP 422'
         ? 'Проверьте условия. Категории на одной карте не должны повторяться.'
@@ -461,7 +580,7 @@ function resultCard(match, winner = false) {
     element('h3', (winner ? 'Лучший выбор · ' : '') + match.cardName),
     element('p', money(match.cashbackKopecks) + ' кэшбэка', 'return'),
     element('p', match.bankName + ' · ' + rateAndLimit(match) +
-      (match.limitApplied ? ' · лимит сработал' : ''), 'muted'),
+      (match.monthlyLimitApplied ? ' · ограничено месячным остатком ' + money(match.monthlyRemainingKopecks) : match.limitApplied ? ' · лимит категории сработал' : ''), 'muted'),
     details
   );
   return entry;
@@ -517,8 +636,8 @@ $('calc').onsubmit = async event => {
       $('results').append(full);
     }
     $('results').append(element('small', scope === 'manual'
-      ? 'Расчёт предполагает полный доступный лимит.'
-      : 'Условия каталога учебные. Расчёт предполагает полный доступный лимит.'));
+      ? 'Месячный остаток учитывается для личных карт, если задан. Расчёт не списывает остаток.'
+      : 'Условия каталога учебные. Месячный остаток учитывается для личных карт, если задан. Расчёт не списывает остаток.'));
   } catch {
     if (current === version) $('status').textContent = 'Не удалось получить расчёт. Попробуйте ещё раз.';
   }
@@ -526,6 +645,7 @@ $('calc').onsubmit = async event => {
 
 addRow();
 updateCards();
+loadAccount();
 </script>
 </body>
 </html>
