@@ -11,6 +11,23 @@ from catalog import import_catalog, SEED
 
 
 class StorageTests(unittest.TestCase):
+    def test_manual_only_matches_custom_categories_across_many_cards(self):
+        with TestClient(create_app(self.db)) as client:
+            self.assertEqual(client.put('/api/me/cards/A').status_code, 204)
+            query = dict(categoryId='  ТАКСИ ', amountKopecks=10000, scope='manual')
+            self.assertEqual(client.post('/api/recommendations', json=query).json()['allMatches'], [])
+            for i in range(7):
+                rules = [dict(categoryName='Такси', rateBps=100+i)]
+                rules += [dict(categoryName=f'Категория {j}', rateBps=500) for j in range(i)]
+                self.assertEqual(client.post('/api/me/manual-cards', json=dict(name=f'Моя {i}', rules=rules)).status_code, 201)
+            cards = client.get('/api/me/manual-cards').json()
+            self.assertEqual([len(c['rules']) for c in cards], list(range(1, 8)))
+            result = client.post('/api/recommendations', json=query).json()
+            self.assertEqual([c['cashbackKopecks'] for c in result['allMatches']], list(range(106, 99, -1)))
+            self.assertEqual(client.post('/api/recommendations', json=dict(query, categoryId='Супермаркеты')).json()['allMatches'], [])
+            duplicate = [dict(categoryName=n, rateBps=500) for n in ('Такси', ' такси ')]
+            self.assertEqual(client.post('/api/me/manual-cards', json=dict(name='Дубль', rules=duplicate)).status_code, 422)
+
     def test_manual_card_is_private_and_calculated(self):
         payload = {'name': 'Моя карта', 'rules': [{'categoryId': 'cafe', 'rateBps': 1000, 'limitKopecks': 12000},
                                                   {'categoryId': 'fuel', 'rateBps': 500}]}

@@ -48,6 +48,10 @@ def card_info(card):
 COOKIE = 'advisor_session'
 
 
+def category_label(raw):
+    return ' '.join(raw.split()) if isinstance(raw, str) else ''
+
+
 def session_id(request):
     value = request.cookies.get(COOKIE, '')
     return value if re.fullmatch(r'[A-Za-z0-9_-]{43}', value) else None
@@ -112,7 +116,11 @@ def create_app(db_path):
             return saved(db, request)
 
     def manual_cards(db, request):
-        return [dict(cardId=card, name=name, updatedOn=updated, rules=json.loads(rules))
+        def display_rule(rule):
+            label = rule.get('categoryName') or CATEGORIES[rule['categoryId']]
+            return {**rule, 'categoryName': label, 'categoryKey': label.casefold()}
+
+        return [dict(cardId=card, name=name, updatedOn=updated, rules=[display_rule(rule) for rule in json.loads(rules)])
                 for card, name, updated, rules in db.execute(
                     'SELECT card_id, name, updated_on, rules_json FROM manual_cards WHERE session = ? ORDER BY rowid',
                     (session_id(request),))]
@@ -127,19 +135,23 @@ def create_app(db_path):
         name, rules = body.get('name'), body.get('rules')
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             return JSONResponse({'code': 'invalid_name'}, 422)
-        if not isinstance(rules, list) or not 1 <= len(rules) <= len(CATEGORIES):
+        if not isinstance(rules, list) or not rules:
             return JSONResponse({'code': 'invalid_rules'}, 422)
         cleaned, seen = [], set()
         for rule in rules:
             if not isinstance(rule, dict):
                 return JSONResponse({'code': 'invalid_rules'}, 422)
             category, rate, limit = rule.get('categoryId'), rule.get('rateBps'), rule.get('limitKopecks')
-            if (not isinstance(category, str) or category not in CATEGORIES or category in seen
+            label = category_label(rule['categoryName']) if 'categoryName' in rule else (
+                CATEGORIES.get(category, '') if isinstance(category, str) else '')
+            key = label.casefold()
+            if (not 1 <= len(label) <= 80 or key in seen
                     or type(rate) is not int or not 0 <= rate <= 10000
                     or (limit is not None and (type(limit) is not int or not 0 <= limit <= 10**12))):
                 return JSONResponse({'code': 'invalid_rules'}, 422)
-            seen.add(category)
-            cleaned.append(dict(categoryId=category, rateBps=rate, limitKopecks=limit))
+            seen.add(key)
+            cleaned.append(dict(categoryId=category if 'categoryName' not in rule else key,
+                                categoryName=label, rateBps=rate, limitKopecks=limit))
         session = session_id(request) or secrets.token_urlsafe(32)
         card = 'manual-' + secrets.token_hex(12)
         today = datetime.now(UTC).date().isoformat()
@@ -180,18 +192,22 @@ def create_app(db_path):
         category, amount, scope = body.get('categoryId'), body.get('amountKopecks'), body.get('scope')
         if type(amount) is not int or not 0 < amount <= 10**12:
             return JSONResponse({'field': 'amountKopecks', 'code': 'positive_integer_required'}, 422)
-        if not isinstance(category, str) or category not in CATEGORIES:
+        if scope == 'manual':
+            label = category_label(category)
+            category = label.casefold() if 1 <= len(label) <= 80 else ''
+        if not isinstance(category, str) or not category or (scope != 'manual' and category not in CATEGORIES):
             return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
-        if scope not in ('all', 'mine'):
+        if scope not in ('all', 'mine', 'manual'):
             return JSONResponse({'field': 'scope', 'code': 'unknown_scope'}, 422)
         with connect(db_path) as db:
             db.execute('BEGIN')
-            rules = rows(db)
-            own = set(saved(db, request)) if scope == 'mine' else None
+            rules = [] if scope == 'manual' else rows(db)
+            own = set() if scope == 'manual' else set(saved(db, request)) if scope == 'mine' else None
             if own is not None:
                 for card in manual_cards(db, request):
                     own.add(card['cardId'])
-                    rules.extend({**rule, 'cardId': card['cardId'], 'cardName': card['name'],
+                    rules.extend({**rule, 'categoryId': rule['categoryKey'] if scope == 'manual' else rule['categoryId'],
+                                  'cardId': card['cardId'], 'cardName': card['name'],
                                   'bankName': 'Введено вручную', 'minAmountKopecks': 1,
                                   'validFrom': card['updatedOn'], 'updatedOn': card['updatedOn'],
                                   'validUntilExclusive': None} for rule in card['rules'])
