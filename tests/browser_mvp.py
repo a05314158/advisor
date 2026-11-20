@@ -24,7 +24,7 @@ def check(base, chromium=None):
             page.locator('#compare').click()
             expect(page.locator('#results h3').first).to_have_text(re.compile(r'Карта B$'))
             expect(page.locator('#results .return').first).to_have_text(re.compile(r'150(?:,00)?\s?₽'))
-            expect(page.get_by_text('Оплатить по ссылке продавца')).to_have_count(0)
+            expect(page.get_by_text('Оплатить через T‑Pay')).to_have_count(0)
             page.locator('#results details summary', has_text='Все подходящие карты').click()
             expect(page.locator('#results h3', has_text='Карта D')).to_be_visible()
             card_a = page.locator('#results article', has_text='Карта A').first
@@ -57,19 +57,15 @@ def check(base, chromium=None):
             winner = page.locator('#results .winner')
             expect(winner.get_by_role('link', name='Открыть Т‑Банк в браузере')).to_have_attribute(
                 'href', 'https://www.tbank.ru/login/')
-            winner.get_by_text('Оплатить по ссылке продавца', exact=True).click()
-            payment = winner.get_by_label('Ссылка на оплату от продавца')
+            winner.get_by_text('Оплатить через T‑Pay', exact=True).click()
+            payment = winner.get_by_label('Ссылка T‑Pay от продавца')
             checkouts = winner.get_by_role('link', name=re.compile(r'Перейти к оплате'))
             fake_qr = 'https://qr.nspk.ru/' + 'A' * 32
             tpay = 'https://o.tbank.ru/tpay/test-fixture'
-            for url in ['https://example.invalid/pay', fake_qr + '?redirect=test',
-                        fake_qr + '?type=02&bank=000000000001&sum=10000&cur=RUB&crc=A1B2']:
+            for url in ['https://example.invalid/pay', fake_qr, tpay + '?redirect=test']:
                 payment.fill(url)
                 expect(checkouts).to_have_count(0)
-            expect(winner.get_by_text(re.compile('Сумма в ссылке отличается'))).to_be_visible()
-            old_format = fake_qr + '?type=02&bank=000000000001&sum=250000&cur=RUB&crc=A1B2'
-            payment.fill(old_format)
-            expect(winner.get_by_role('link', name='Перейти к оплате через СБП')).to_have_attribute('href', old_format)
+            expect(winner.get_by_text(re.compile('Ссылки СБП здесь не подходят'))).to_be_visible()
             payment.fill(tpay)
             link = winner.get_by_role('link', name='Перейти к оплате через T‑Pay')
             expect(link).to_have_attribute('href', tpay)
@@ -91,11 +87,7 @@ def check(base, chromium=None):
             expect(page.locator('#results h3').first).to_have_text(re.compile(r'Вторая$'))
             expect(winner.get_by_role('link', name='Открыть Альфа‑Банк в браузере')).to_have_attribute(
                 'href', 'https://web.alfabank.ru/')
-            winner.get_by_text('Оплатить по ссылке продавца', exact=True).click()
-            payment.fill(tpay)
-            expect(checkouts).to_have_count(0)
-            payment.fill(fake_qr)
-            expect(winner.get_by_role('link', name='Перейти к оплате через СБП')).to_have_attribute('href', fake_qr)
+            expect(winner.get_by_text('Оплатить через T‑Pay', exact=True)).to_have_count(0)
             page.get_by_role('button', name='Записать эту покупку').click()
             expect(page.locator('#purchase-amount')).to_have_value('2500')
             expect(page.locator('#purchase-category')).to_have_value('Такси')

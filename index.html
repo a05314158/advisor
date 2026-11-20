@@ -558,51 +558,18 @@ $('manual-form').onsubmit = async event => {
   }, 'Карта сохранена.');
 };
 
-function merchantPayment(raw, amountKopecks, bank) {
-  const link = raw.trim();
-  if (/^https:\/\/o\.tbank\.ru\/tpay\/[A-Za-z0-9_-]{1,160}$/.test(link)) {
-    return bank === 'tbank'
-      ? {url:link, label:'Перейти к оплате через T‑Pay'}
-      : {message:'Эта ссылка открывает T‑Pay. Для рекомендованной карты используйте СБП или способ оплаты продавца.'};
-  }
-  if (!/^https:\/\/qr\.nspk\.ru\/[A-Za-z0-9]{32}(?:\?[a-zA-Z0-9=&]+)?$/.test(link)) {
-    return {message:'Вставьте ссылку СБП или T‑Pay, полученную у продавца.'};
-  }
-  const {searchParams: query} = new URL(link);
-  if (link.includes('?')) {
-    const allowed = new Set(['type','bank','sum','cur','crc']);
-    for (const key of query.keys()) {
-      if (!allowed.has(key) || query.getAll(key).length !== 1) {
-        return {message:'У ссылки СБП неподдерживаемые параметры.'};
-      }
-    }
-    const type = query.get('type'), sum = query.get('sum');
-    if (!['01','02'].includes(type) || !/^\d{12}$/.test(query.get('bank') || '') ||
-        !/^[0-9a-fA-F]{4}$/.test(query.get('crc') || '') ||
-        (sum !== null && (!/^\d{1,12}$/.test(sum) || query.get('cur') !== 'RUB')) ||
-        (type === '02' && sum === null) || (sum === null && query.has('cur'))) {
-      return {message:'Проверьте ссылку СБП и скопируйте её целиком.'};
-    }
-    if (sum !== null && Number(sum) !== amountKopecks) {
-      return {message:'Сумма в ссылке отличается от расчёта. Проверьте покупку перед оплатой.'};
-    }
-  }
-  return {url:link, label:'Перейти к оплате через СБП'};
-}
-
 function bankActions(match) {
   const actions = element('div', '', 'stack');
   const access = match.bankAccess;
-  if (access) {
-    const web = element('a', 'Открыть ' + access.name + ' в браузере', 'outbound secondary');
-    web.href = access.webUrl;
-    web.target = '_blank';
-    web.rel = 'noopener noreferrer';
-    actions.append(web);
-  }
+  const web = element('a', 'Открыть ' + access.name + ' в браузере', 'outbound secondary');
+  web.href = access.webUrl;
+  web.target = '_blank';
+  web.rel = 'noopener noreferrer';
+  actions.append(web);
+  if (access.id !== 'tbank') return actions;
   const details = element('details');
   const body = element('div', '', 'stack');
-  const field = element('label', 'Ссылка на оплату от продавца');
+  const field = element('label', 'Ссылка T‑Pay от продавца');
   const input = element('input');
   input.type = 'url';
   input.autocomplete = 'off';
@@ -614,21 +581,18 @@ function bankActions(match) {
   pay.rel = 'noreferrer';
   pay.hidden = true;
   input.oninput = () => {
-    const result = input.value.trim()
-      ? merchantPayment(input.value, match.calculation.amountKopecks, access?.id) : {};
-    message.textContent = result.message || '';
-    pay.hidden = !result.url;
-    if (result.url) {
-      pay.href = result.url;
-      pay.textContent = result.label;
-    } else {
-      pay.removeAttribute('href');
-    }
+    const link = input.value.trim();
+    const valid = /^https:\/\/o\.tbank\.ru\/tpay\/[A-Za-z0-9_-]{1,160}$/.test(link);
+    message.textContent = link && !valid ? 'Вставьте ссылку T‑Pay от продавца. Ссылки СБП здесь не подходят.' : '';
+    pay.hidden = !valid;
+    if (valid) pay.href = link;
+    else pay.removeAttribute('href');
   };
+  pay.textContent = 'Перейти к оплате через T‑Pay';
   field.append(input);
   body.append(field, message, pay, element('small',
-    'Перед подтверждением проверьте магазин, сумму и счёт списания. При оплате через СБП условия кэшбэка могут отличаться.'));
-  details.append(element('summary', 'Оплатить по ссылке продавца'), body);
+    'Перед подтверждением проверьте магазин, сумму и карту списания на стороне Т‑Банка.'));
+  details.append(element('summary', 'Оплатить через T‑Pay'), body);
   actions.append(details);
   return actions;
 }
@@ -659,7 +623,8 @@ function resultCard(match, winner = false) {
     element('small', monthly),
     details
   );
-  if (winner && (saved.has(match.cardId) || manual.some(card => card.cardId === match.cardId))) {
+  if (winner && match.bankAccess &&
+      (saved.has(match.cardId) || manual.some(card => card.cardId === match.cardId))) {
     entry.append(bankActions(match));
   }
   return entry;
