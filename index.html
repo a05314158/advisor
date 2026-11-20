@@ -39,6 +39,10 @@
     ul { margin: .35rem 0 0; padding-left: 1.15rem; }
     fieldset { min-width: 0; margin: 0; border: 1px solid #d2ded6; border-radius: .55rem; padding: .75rem; }
     .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .bank-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; }
+    .bank-tile { display:flex; align-items:center; gap:.55rem; text-align:left; min-height:54px; border-color:#7d9487; padding:.4rem .5rem; overflow-wrap:anywhere; }
+    .bank-mark { flex:none; display:grid; place-items:center; width:2rem; height:2rem; border-radius:.45rem; font-weight:800; background:var(--mark-bg); color:var(--mark-ink); }
+    .category-choice { padding-inline:.55rem; }
   </style>
 </head>
 <body>
@@ -96,17 +100,27 @@
       <button type="button" class="secondary" id="retry" hidden>Повторить загрузку</button>
       <div id="my-list" class="stack"></div>
       <details id="catalog">
-        <summary>Добавить из каталога</summary>
+        <summary>Учебный каталог карт</summary>
         <div class="stack">
           <label>Категория в каталоге<select id="catalog-category"><option value="">Все категории</option></select></label>
           <div id="catalog-list" class="stack"></div>
         </div>
       </details>
       <details id="manual-entry">
-        <summary>Ввести карту вручную</summary>
-        <form id="manual-form" class="stack">
+        <summary>Добавить карту</summary>
+        <div id="bank-picker" class="stack">
+          <label>Найти банк<input id="bank-search" type="search" autocomplete="off" placeholder="Например, Т‑Банк"></label>
+          <div class="bank-grid" id="bank-options" aria-label="Банки"></div>
+          <p id="bank-status" role="status" hidden>Банк не найден. Его можно указать вручную.</p>
+          <button type="button" class="secondary" id="other-bank">Другой банк</button>
+        </div>
+        <form id="manual-form" class="stack" hidden>
+          <div class="actions">
+            <strong id="chosen-bank"></strong>
+            <button type="button" class="secondary" id="change-bank">Сменить банк</button>
+          </div>
+          <label id="manual-bank-label" hidden>Название банка<input id="manual-bank" maxlength="80" required></label>
           <label>Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
-          <label>Банк<input id="manual-bank" required maxlength="80"></label>
           <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
           <label>Уже начислено в этом месяце, ₽<input id="manual-monthly-used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
           <div id="manual-rules" class="stack"></div>
@@ -122,7 +136,8 @@
 
   <template id="rule-template">
     <fieldset class="stack">
-      <label>Категория<input name="category" required maxlength="80" list="known-categories"></label>
+      <label>Категория<input name="category" required maxlength="80" placeholder="Найти или указать свою"></label>
+      <div class="actions" data-category-choices aria-label="Категории кэшбэка"></div>
       <div class="fields">
         <label>Кэшбэк, %<input name="rate" required inputmode="decimal" maxlength="6"></label>
         <label>Лимит возврата, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Необязательно"></label>
@@ -146,6 +161,15 @@ let categoryGroups = {};
 let catalog = [];
 let saved = new Set();
 let catalogBalances = {};
+const BANKS = [
+  {name:'Т‑Банк', mark:'Т', aliases:'Тинькофф Tinkoff TBank', bg:'#ffd524', ink:'#211c0e'},
+  {name:'Альфа‑Банк', mark:'А', aliases:'Alfa Bank', bg:'#be1a22', ink:'#fff'},
+  {name:'Сбер', mark:'С', aliases:'Сбербанк Sberbank', bg:'#08734e', ink:'#fff'},
+  {name:'ВТБ', mark:'В', aliases:'VTB', bg:'#10448c', ink:'#fff'},
+  {name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
+  {name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
+];
+const popularCategories = ['supermarkets','groceries','cafe','taxi','pharmacies','marketplaces'];
 let manual = [];
 
 function element(tag, text, className) {
@@ -272,6 +296,7 @@ function renderCategories() {
     }
   }
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  $('manual-rules').querySelectorAll('fieldset').forEach(renderRuleChoices);
   compareEnabled();
 }
 
@@ -443,8 +468,67 @@ async function updateCards(change, completion = '') {
   }
 }
 
+function searchKey(text) {
+  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function renderBankChoices() {
+  const query = searchKey($('bank-search').value);
+  const list = BANKS.filter(bank => searchKey(bank.name + ' ' + bank.aliases).includes(query));
+  $('bank-options').replaceChildren(...list.map(bank => {
+    const button = element('button', '', 'bank-tile secondary');
+    button.type = 'button';
+    const mark = element('span', bank.mark, 'bank-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.style.setProperty('--mark-bg', bank.bg);
+    mark.style.setProperty('--mark-ink', bank.ink);
+    button.append(mark, element('span', bank.name));
+    button.onclick = () => selectBank(bank.name);
+    return button;
+  }));
+  $('bank-status').hidden = list.length > 0;
+}
+
+function selectBank(name) {
+  $('bank-picker').hidden = true;
+  $('manual-form').hidden = false;
+  $('chosen-bank').textContent = name || 'Другой банк';
+  $('manual-bank-label').hidden = Boolean(name);
+  $('manual-bank').readOnly = Boolean(name);
+  $('manual-bank').value = name || '';
+  $(name ? 'manual-name' : 'manual-bank').focus();
+}
+
+function showBankPicker() {
+  $('manual-form').hidden = true;
+  $('bank-picker').hidden = false;
+  $('bank-search').value = '';
+  renderBankChoices();
+}
+
+function renderRuleChoices(row) {
+  const input = row.querySelector('[name=category]');
+  const target = row.querySelector('[data-category-choices]');
+  const query = searchKey(input.value);
+  const names = query ? Object.values(categories).filter(name => searchKey(name).includes(query))
+    : popularCategories.map(id => categories[id]).filter(Boolean);
+  target.replaceChildren(...names.filter(name => searchKey(name) !== query).slice(0, 6).map(name => {
+    const choice = element('button', name, 'category-choice secondary');
+    choice.type = 'button';
+    choice.onclick = () => {
+      input.value = name;
+      renderRuleChoices(row);
+      row.querySelector('[name=rate]').focus();
+    };
+    return choice;
+  }));
+  target.hidden = !target.childElementCount;
+}
+
 function addRow() {
   const row = $('rule-template').content.firstElementChild.cloneNode(true);
+  row.querySelector('[name=category]').oninput = () => renderRuleChoices(row);
+  renderRuleChoices(row);
   row.querySelector('[data-remove]').onclick = () => {
     row.remove();
     if (!$('manual-rules').children.length) addRow();
@@ -493,6 +577,12 @@ $('account-form').onsubmit = event => {
   changeAccount(action, payload);
 };
 $('logout').onclick = () => changeAccount('logout', {});
+$('bank-search').oninput = renderBankChoices;
+$('other-bank').onclick = () => selectBank();
+$('change-bank').onclick = () => {
+  showBankPicker();
+  $('bank-search').focus();
+};
 $('add-rule').onclick = () => addRow().querySelector('input').focus();
 $('retry').onclick = () => updateCards();
 $('catalog-category').onchange = renderCatalog;
@@ -549,6 +639,7 @@ $('manual-form').onsubmit = async event => {
       throw error;
     }
     $('manual-form').reset();
+    showBankPicker();
     $('manual-rules').replaceChildren();
     addRow();
     $('scope').value = 'mine';
@@ -825,6 +916,7 @@ $('purchase-form').onsubmit = async event => {
   }
 };
 
+renderBankChoices();
 addRow();
 updateCards();
 loadAccount();

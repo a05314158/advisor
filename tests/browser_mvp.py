@@ -39,11 +39,34 @@ def check(base, chromium=None):
             credentials = {'username':'defense-' + uuid4().hex[:12], 'password':uuid4().hex}
             response = page.request.post(base + '/api/auth/register', data=credentials)
             assert response.status == 201, response.text()
-            for name, rate in [('Первая',1000), ('Вторая',400), ('Третья',380), ('Четвёртая',350)]:
-                bank = {'Первая': 'Т‑Банк', 'Вторая': 'Альфа‑Банк'}.get(name, 'Учебный банк')
+            page.reload()
+            form = page.locator('#manual-form')
+            page.get_by_text('Добавить карту', exact=True).click()
+            page.get_by_role('button', name='Другой банк', exact=True).click()
+            expect(form.get_by_label('Название банка')).to_be_visible()
+            form.get_by_role('button', name='Сменить банк').click()
+            search = page.get_by_label('Найти банк')
+            search.fill('неизвестный')
+            expect(page.get_by_text('Банк не найден.', exact=False)).to_be_visible()
+            search.fill('тинькофф')
+            expect(page.locator('.bank-tile')).to_have_count(1)
+            page.get_by_role('button', name='Т‑Банк', exact=True).click()
+            form.get_by_label('Название карты (без номера)').fill('Первая')
+            form.get_by_label('Общий лимит кэшбэка за месяц, ₽').fill('3000')
+            form.get_by_label('Уже начислено в этом месяце, ₽').fill('2880')
+            form.get_by_label('Категория', exact=True).fill('так')
+            form.get_by_role('button', name='Такси', exact=True).click()
+            expect(form.get_by_label('Категория', exact=True)).to_have_value('Такси')
+            form.get_by_label('Кэшбэк, %', exact=True).fill('10')
+            form.get_by_role('button', name='Ещё категория').click()
+            form.get_by_label('Категория', exact=True).last.fill('Своя категория')
+            form.get_by_label('Кэшбэк, %', exact=True).last.fill('1')
+            form.get_by_role('button', name='Сохранить карту').click()
+            expect(page.locator('#my-list article', has_text='Первая')).to_be_visible()
+            expect(page.locator('#my-list article', has_text='Первая')).to_contain_text('Своя категория')
+            for name, rate in [('Вторая',400), ('Третья',380), ('Четвёртая',350)]:
+                bank = 'Альфа‑Банк' if name == 'Вторая' else 'Учебный банк'
                 body = {'name':name, 'bankName':bank, 'rules':[{'categoryName':'Такси','rateBps':rate}]}
-                if name == 'Первая':
-                    body.update(monthlyLimitKopecks=300_000, monthlyUsedKopecks=288_000)
                 response = page.request.post(base + '/api/me/manual-cards', data=body)
                 assert response.status == 201, response.text()
             page.reload()
