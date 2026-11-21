@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from bank_links import bank_access
 from cashback_planner import mount_planner
-from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows
+from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows, wallet_purchase_table
 PAGE = Path(__file__).with_name('wallet.html')
 SCRIPT = Path(__file__).with_name('wallet-cashback.js')
 BUILD_REVISION = '$Format:%H$'
@@ -283,6 +283,7 @@ def create_app(db_path):
     def health():
         with connect(db_path) as db:
             db.execute('SELECT 1 FROM rules LIMIT 1').fetchone()
+            db.execute(f'SELECT session, bought_on FROM {wallet_purchase_table(db)} LIMIT 0')
         status = {'status': 'ok'}
         if re.fullmatch(r'[0-9a-f]{40}', BUILD_REVISION):
             status['revision'] = BUILD_REVISION
@@ -569,7 +570,7 @@ def create_app(db_path):
                 best = result['top3'][0]
                 usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
                 usual_hit = next((item for item in result['allMatches'] if usual and item['cardId'] == usual[0]), None)
-                db.execute('''INSERT INTO purchases
+                db.execute(f'''INSERT INTO {wallet_purchase_table(db)}
                     (session, bought_on, category_id, amount_kopecks,
                      recommended_card, recommended_name, recommended_kopecks,
                      chosen_card, chosen_name, chosen_kopecks, usual_kopecks, catalog_version)
@@ -594,8 +595,8 @@ def create_app(db_path):
         month = datetime.now(UTC).date().strftime('%Y-%m')
         with connect(db_path) as db:
             usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
-            raw = db.execute('''SELECT bought_on, category_id, amount_kopecks, recommended_name, recommended_kopecks,
-                chosen_name, chosen_kopecks, usual_kopecks FROM purchases
+            raw = db.execute(f'''SELECT bought_on, category_id, amount_kopecks, recommended_name, recommended_kopecks,
+                chosen_name, chosen_kopecks, usual_kopecks FROM {wallet_purchase_table(db)}
                 WHERE session = ? AND bought_on LIKE ? ORDER BY id DESC''', (session, month + '%')).fetchall()
         items = [dict(date=row[0], categoryId=row[1], amountKopecks=row[2], recommendedName=row[3],
                       recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7])

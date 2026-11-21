@@ -61,6 +61,12 @@ def connect(path):
         db.close()
 
 
+def wallet_purchase_table(db):
+    # Keep the classic journal and its foreign keys intact on staging and rollback.
+    columns = {row[1] for row in db.execute('PRAGMA table_info(purchases)')}
+    return 'wallet_purchases' if 'account_id' in columns else 'purchases'
+
+
 def setup(db):
     db.executescript('''
         CREATE TABLE IF NOT EXISTS rules (
@@ -90,16 +96,18 @@ def setup(db):
           digest TEXT NOT NULL, response_json TEXT NOT NULL,
           PRIMARY KEY(session, operation, request_id)
         );
-        CREATE TABLE IF NOT EXISTS purchases (
+        CREATE TABLE IF NOT EXISTS usual_card (
+          session TEXT PRIMARY KEY, card_id TEXT NOT NULL
+        );
+    ''')
+    db.execute(f'''
+        CREATE TABLE IF NOT EXISTS {wallet_purchase_table(db)} (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           session TEXT NOT NULL, bought_on TEXT NOT NULL, category_id TEXT NOT NULL,
           amount_kopecks INTEGER NOT NULL,
           recommended_card TEXT NOT NULL, recommended_name TEXT NOT NULL, recommended_kopecks INTEGER NOT NULL,
           chosen_card TEXT NOT NULL, chosen_name TEXT NOT NULL, chosen_kopecks INTEGER NOT NULL,
           usual_kopecks INTEGER, catalog_version TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS usual_card (
-          session TEXT PRIMARY KEY, card_id TEXT NOT NULL
         );
     ''')
     columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
