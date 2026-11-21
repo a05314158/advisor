@@ -279,6 +279,7 @@ def personal_scenario(page, base, directory):
     expect(review).to_be_hidden()
     page.reload()
     expect(cards).to_be_visible()
+    expect(details).to_contain_text(re.compile('Карта A|ВТБ'))
     button(cards, 'Назад').click()
     page.locator('#openBuy').click()
     category(page, 'Транспорт')
