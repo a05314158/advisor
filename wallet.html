@@ -16,6 +16,26 @@
   </style>
   <style>.bank-result-link{display:inline-flex;align-items:center;min-height:44px;color:inherit;text-underline-offset:3px}</style>
   <style>
+    .profile-link{min-height:44px;padding:0 10px;border-radius:12px;color:var(--ink);background:transparent;font:inherit;font-size:.875rem;cursor:pointer}
+    .profile-link[aria-current]{background:#ffdd2d;color:#211e16}
+    .profile-panel{display:grid;gap:24px}.profile-panel>.back{justify-self:start}
+    .profile-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px}
+    .profile-heading h2,.profile-heading h3,.profile-heading p{margin:0}.profile-heading p,.profile-note{font-size:.875rem;opacity:.8}
+    .profile-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,125px),1fr));gap:10px;margin:0}
+    .profile-summary div{padding:14px 12px;border:1px solid #8885;border-radius:14px}
+    .profile-summary dt,.profile-comparison dt{font-size:.875rem}.profile-summary dd{margin:8px 0 0;font-size:1.25rem;font-weight:700;overflow-wrap:anywhere}
+    .profile-chart{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));align-items:center;gap:16px;margin-block:16px}
+    .profile-donut{position:relative;isolation:isolate;display:grid;place-items:center;width:144px;aspect-ratio:1;justify-self:center;text-align:center}
+    .profile-donut:before{content:'';position:absolute;inset:0;z-index:-1;border-radius:50%;background:var(--chart-fill,#8885);mask:radial-gradient(farthest-side,transparent 72%,#000 73%)}
+    .profile-donut strong,.profile-donut small{display:block}.profile-donut strong{font-size:1rem;max-width:100px;overflow-wrap:anywhere}
+    .profile-legend{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+    .profile-legend li{display:grid;grid-template-columns:12px 1fr;align-items:baseline;gap:8px}
+    .profile-legend li::before{content:'';width:10px;height:10px;border-radius:50%;background:var(--card-color)}
+    .profile-legend strong,.profile-legend small{display:block;overflow-wrap:anywhere}.profile-legend small{opacity:.8}
+    .profile-comparison{display:grid;gap:8px;margin:0}.profile-comparison div{display:flex;justify-content:space-between;gap:8px}
+    .profile-comparison dd{margin:0;font-weight:700;text-align:end}.profile-settings label{display:grid;gap:8px}
+  </style>
+  <style>
     .purchase-scope,.wallet-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
     .purchase-scope button,.wallet-actions button,.catalog-card button{min-height:44px;padding:8px 12px;border:1px solid currentColor;border-radius:10px;background:transparent;color:inherit;cursor:pointer}
     .purchase-scope button[aria-pressed=true]{background:#ffdd2d;color:#211e16;border-color:#ffdd2d}
@@ -36,7 +56,7 @@
     <div class="auth-card"><div class="brand"><span class="mark brand-mark" aria-hidden="true"></span><span>Советник</span></div><div class="eyebrow" style="margin-top:42px">Ваш личный кошелёк</div><h1 id="authTitle">Создайте кошелёк</h1><form class="auth-form" id="authForm"><label for="authLogin">Логин<input id="authLogin" name="login" autocomplete="username" required minlength="3" maxlength="32" spellcheck="false" placeholder="anna"></label><label for="authPassword">Пароль<input id="authPassword" name="password" type="password" autocomplete="new-password" required minlength="4" maxlength="72"></label><button id="authSubmit" type="submit">Создать кошелёк</button><div class="auth-error" id="authError" role="alert" aria-live="polite"></div></form><button class="auth-switch" id="authSwitch" type="button">Уже есть кошелёк? Войти</button></div>
   </section>
   <main class="page" id="appScreen" hidden>
-    <header class="topbar"><button class="icon-btn" id="themeToggle" type="button" aria-pressed="false" aria-label="Тема"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M15.5 3.2a8.2 8.2 0 1 0 5.4 12.8A6.6 6.6 0 0 1 15.5 3.2z"/></svg></button><div class="brand"><span class="mark brand-mark" aria-hidden="true"></span><span>Советник</span></div><button class="icon-btn" id="settingsOpen" type="button" aria-label="Настройки"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19.4 13.4a7.6 7.6 0 0 0 .05-1.4 7.6 7.6 0 0 0-.05-1.4l1.9-1.5-1.9-3.3-2.4 1a7 7 0 0 0-2.4-1.4L14.2 2h-4.4l-.4 2.4a7 7 0 0 0-2.4 1.4l-2.4-1L2.7 9.1l1.9 1.5a7.6 7.6 0 0 0 0 2.8l-1.9 1.5 1.9 3.3 2.4-1a7 7 0 0 0 2.4 1.4l.4 2.4h4.4l.4-2.4a7 7 0 0 0 2.4-1.4l2.4 1 1.9-3.3-1.9-1.5zM12 15.2A3.2 3.2 0 1 1 12 8.8a3.2 3.2 0 0 1 0 6.4z"/></svg></button></header><nav class="mobile-nav" hidden aria-label="Разделы кошелька"><button class="active" type="button" data-section="wallet">Кошелёк</button><button type="button" data-section="compare">Сравнить</button></nav>
+    <header class="topbar"><button class="icon-btn" id="themeToggle" type="button" aria-pressed="false" aria-label="Тема"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M15.5 3.2a8.2 8.2 0 1 0 5.4 12.8A6.6 6.6 0 0 1 15.5 3.2z"/></svg></button><div class="brand"><span class="mark brand-mark" aria-hidden="true"></span><span>Советник</span></div><button class="profile-link" id="openProfile" type="button">Профиль</button></header>
     <section class="hero pocket-hero" id="hero" aria-label="Кошелёк">
       <div class="scene">
         <div class="wallet">
@@ -112,7 +132,39 @@
         <details id="allBuyResults" hidden><summary>Все подходящие карты</summary><div class="result-list" id="otherBuyResults"></div></details>
         <details id="purchaseCatalog" hidden><summary>Карты и условия каталога</summary><div class="purchase-catalog" id="catalogCards"></div></details>
       </section>
-      <section class="panel" id="cardsPanel" hidden aria-labelledby="cards-title"><button class="back" id="cardsBack" type="button">Назад</button><div class="panel-header"><div><h2 id="cards-title">Мои карты</h2><p class="panel-subtitle" id="cardsSubtitle">Список карт</p></div><button class="add-button" id="openCatalog" type="button" aria-label="Добавить карту">+</button></div><div class="card-carousel" id="cardCarousel" tabindex="0" role="region" aria-roledescription="карусель" aria-label="Мои банковские карты"><div class="carousel-shadow" id="carouselShadow"></div><div class="carousel-track" id="carouselTrack"><div class="empty">Загружаем список…</div></div></div><div class="carousel-controls" id="carouselControls" hidden><button class="carousel-arrow" id="carouselPrev" type="button" aria-label="Предыдущая карта">‹</button><span class="carousel-position" id="carouselPosition" aria-live="polite"></span><button class="carousel-arrow" id="carouselNext" type="button" aria-label="Следующая карта">›</button></div><div class="card-carousel-details" id="carouselDetails" hidden></div><div class="saved-list" id="savedList" hidden></div><div class="card-tools"><button type="button" id="addCardBtn">Добавить карту</button><button type="button" id="addCashbackBtn">Добавить кешбек на карту</button><button type="button" id="showCashbackBtn">Посмотреть кешбек по картам</button><button type="button" id="openPlan">План кешбэка на месяц</button><button type="button" id="showStatsBtn">Статистика</button></div><div id="cashbackView" hidden></div><div class="stats-box" id="statsBox" hidden></div></section>
+      <section class="panel" id="cardsPanel" hidden aria-labelledby="cards-title"><button class="back" id="cardsBack" type="button">Назад</button><div class="panel-header"><div><h2 id="cards-title">Мои карты</h2><p class="panel-subtitle" id="cardsSubtitle">Список карт</p></div><button class="add-button" id="openCatalog" type="button" aria-label="Добавить карту">+</button></div><div class="card-carousel" id="cardCarousel" tabindex="0" role="region" aria-roledescription="карусель" aria-label="Мои банковские карты"><div class="carousel-shadow" id="carouselShadow"></div><div class="carousel-track" id="carouselTrack"><div class="empty">Загружаем список…</div></div></div><div class="carousel-controls" id="carouselControls" hidden><button class="carousel-arrow" id="carouselPrev" type="button" aria-label="Предыдущая карта">‹</button><span class="carousel-position" id="carouselPosition" aria-live="polite"></span><button class="carousel-arrow" id="carouselNext" type="button" aria-label="Следующая карта">›</button></div><div class="card-carousel-details" id="carouselDetails" hidden></div><div class="saved-list" id="savedList" hidden></div><div class="card-tools"><button type="button" id="addCardBtn">Добавить карту</button><button type="button" id="addCashbackBtn">Добавить кешбек на карту</button></div></section>
+      <section class="panel profile-panel" id="profilePanel" hidden aria-labelledby="profileTitle">
+        <button class="back" id="profileBack" type="button">Назад</button>
+        <div class="profile-heading"><h2 id="profileTitle" tabindex="-1">Профиль</h2><p id="profileLogin"></p></div>
+        <dl class="profile-summary">
+          <div><dt>Карт в кошельке</dt><dd id="profileCardCount">—</dd></div>
+          <div><dt>Покупок за месяц</dt><dd id="profilePurchaseCount">—</dd></div>
+          <div><dt>Расчётный кэшбэк</dt><dd id="profileCashback">—</dd></div>
+        </dl>
+        <section aria-labelledby="profileStatsTitle">
+          <div class="profile-heading"><h3 id="profileStatsTitle">Статистика по картам</h3><p id="profileMonth"></p></div>
+          <p id="profileStatsStatus" role="status"></p>
+          <button class="back" id="profileRetry" type="button" hidden>Повторить загрузку</button>
+          <div id="profileStatsBody" hidden>
+            <div class="profile-chart">
+              <div class="profile-donut" id="profileDonut" aria-hidden="true"><div><strong id="profileDonutTotal"></strong><small>кэшбэк</small></div></div>
+              <ul class="profile-legend" id="profileLegend" aria-label="Кэшбэк и траты по картам"></ul>
+            </div>
+            <dl class="profile-comparison">
+              <div><dt>По лучшим рекомендациям</dt><dd id="profileRecommended"></dd></div>
+              <div><dt>Упущенный кэшбэк</dt><dd id="profileMissed"></dd></div>
+              <div id="profileUsualComparison" hidden><dt>Разница с обычной картой</dt><dd id="profileUsualDifference"></dd></div>
+            </dl>
+            <p class="profile-note">По записанным покупкам за месяц. Фактические начисления видны в банке.</p>
+            <button class="back" id="profileExplain" type="button">Разобрать месяц</button>
+            <p id="profileComment" role="status" hidden></p>
+          </div>
+        </section>
+        <div class="profile-settings">
+          <label for="usualCard">Обычная карта для сравнения<select id="usualCard" disabled><option value="">Не выбрана</option></select></label>
+          <div class="wallet-actions"><button id="openPlan" type="button">План кэшбэка на месяц</button></div>
+        </div>
+      </section>
     </section>
   </main>
   <div class="dialog cashback-dialog" id="catalogDialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="dialogTitle">Условия кешбэка</h2><button class="close" id="closeCatalog" type="button" aria-label="Закрыть">×</button></div>
@@ -121,7 +173,6 @@
   </div></div>
   <div class="dialog cashback-dialog" id="planDialog" role="dialog" aria-modal="true" aria-labelledby="planTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="planTitle">План кешбэка</h2><button class="close" id="closePlan" aria-label="Закрыть" type="button">×</button></div><form id="planForm" class="shot-form"><label>Месяц выбора<input id="planMonth" type="month" required></label><label>Траты для прогноза<select id="spendingSource"><option value="history">Из истории покупок</option><option value="manual">Ввести суммы по категориям</option></select></label><label id="spendingPeriod">Месяц покупок<input id="spendingMonth" type="month" required></label><div id="spendingInputs" hidden></div><button class="confirm" id="calculatePlan" type="submit">Сравнить варианты</button></form><div id="planResult" aria-live="polite"></div><p id="planError" class="auth-error" role="alert"></p></div></div>
   <div class="dialog" id="addDialog" role="dialog" aria-modal="true" aria-labelledby="addTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="addTitle">Добавить карту</h2><button class="close" id="closeAdd" type="button" aria-label="Закрыть">×</button></div><form id="addCardForm"><label>Поиск по названию или номеру<input id="newBankSearch" type="search" autocomplete="off"></label><label for="newBank">Банк<select id="newBank" required></select></label><button class="confirm" type="submit">Добавить</button></form></div></div>
-  <div class="dialog" id="settingsDialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="settingsTitle">Настройки</h2><button class="close" id="closeSettings" type="button" aria-label="Закрыть">×</button></div><label for="usualCard">Обычная карта<select id="usualCard"><option value="">Не выбрана</option></select></label></div></div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="editCardDialog" aria-labelledby="editCardTitle"><div class="dialog-card">
     <div class="dialog-head"><h2 id="editCardTitle">Условия карты</h2><button type="button" class="close" id="closeEditCard" aria-label="Закрыть">×</button></div>
@@ -184,9 +235,19 @@
     $('themeToggle').addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
     let buyCategory='', buyScope='mine';
     let buyToken=0;
-    function showHome(){$('hero').hidden=false;$('content').hidden=true}
-    function showBuy(){$('hero').hidden=true;$('content').hidden=false;$('buyPanel').hidden=false;$('cardsPanel').hidden=true;paintCategories();runBuy()}
-    function showCards(){$('hero').hidden=true;$('content').hidden=false;$('buyPanel').hidden=true;$('cardsPanel').hidden=false;if($('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot();applyCarouselTransforms()}}
+    function showHome() {
+      $('hero').hidden=false;$('content').hidden=true;
+      $('openProfile').removeAttribute('aria-current');
+      $('openBuy').focus();
+    }
+    function showWalletPanel(active) {
+      $('hero').hidden=true;$('content').hidden=false;
+      for (const panel of ['buyPanel','cardsPanel','profilePanel']) $(panel).hidden=panel!==active;
+      if (active==='profilePanel') $('openProfile').setAttribute('aria-current','page');
+      else $('openProfile').removeAttribute('aria-current');
+    }
+    function showBuy(){showWalletPanel('buyPanel');paintCategories();runBuy()}
+    function showCards(){showWalletPanel('cardsPanel');if($('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot();applyCarouselTransforms()}}
     $('openBuy').addEventListener('click',showBuy);
     $('openCards').addEventListener('click',showCards);
     $('buyBack').addEventListener('click',showHome);
@@ -356,14 +417,96 @@
     $('addDialog').addEventListener('click',event=>{if(event.target===$('addDialog'))$('addDialog').hidden=true});
     $('addCardForm').addEventListener('submit',async event=>{event.preventDefault();const bank=banks.find(item=>item.id===$('newBank').value);try{await api('/api/me/manual-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:bank.name,rules:[]})});$('addDialog').hidden=true;toast(`Добавлен ${bank.name}`);await load()}catch(error){toast(error.message)}});
     // Screenshot review and monthly planning are attached by wallet-cashback.js.
-    $('showCashbackBtn').addEventListener('click',()=>{const view=$('cashbackView');view.hidden=!view.hidden;view.replaceChildren();if(view.hidden)return;if(!manual.length){view.textContent='Карт с кешбэком пока нет';return}for(const card of manual){const block=document.createElement('article');block.className='saved-card';const lines=(card.rules||[]).map(rule=>`${rule.label||categories[rule.categoryId]||rule.categoryId} ${formatRate(rule.rateBps)}%`).join(', ')||'Кешбэк не добавлен';block.innerHTML=`<div class="saved-info"><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(lines)}</small></div>`;view.append(block)}});
-    function rub(value){return value==null?'—':money(value)}
-    $('showStatsBtn').addEventListener('click',async()=>{const box=$('statsBox');box.hidden=false;box.textContent='Считаем…';try{const data=await api('/api/me/stats');box.replaceChildren();const note=document.createElement('p');note.textContent=data.note;const lines=document.createElement('p');lines.textContent=`Покупок: ${data.count}. По выбранным картам: ${money(data.calculatedKopecks)}. Если бы всегда брали лучшую: ${money(data.recommendedKopecks)}. Недобор: ${money(data.missedKopecks)}. К обычной карте: ${rub(data.versusUsualKopecks)}.`;const ask=document.createElement('button');ask.type='button';ask.textContent='Разобрать месяц';ask.addEventListener('click',async()=>{ask.disabled=true;try{const reply=await api('/api/me/stats/comment',{method:'POST'},45000);const comment=document.createElement('p');comment.textContent=reply.comment;box.append(comment)}catch(error){toast(error.message)}finally{ask.disabled=false}});box.append(note,lines,ask)}catch(error){box.textContent=error.message}});
-    async function openSettings(){const select=$('usualCard');select.replaceChildren(new Option('Не выбрана',''));for(const card of manual)select.append(new Option(card.name,card.cardId));try{const data=await api('/api/me/stats');if(data.usualCardId)select.value=data.usualCardId}catch{}$('settingsDialog').hidden=false}
-    $('settingsOpen').addEventListener('click',openSettings);
-    $('closeSettings').addEventListener('click',()=>{$('settingsDialog').hidden=true});
-    $('settingsDialog').addEventListener('click',event=>{if(event.target===$('settingsDialog'))$('settingsDialog').hidden=true});
-    $('usualCard').addEventListener('change',async()=>{if(!$('usualCard').value)return;try{await api('/api/me/usual-card',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cardId:$('usualCard').value})});toast('Обычная карта сохранена')}catch(error){toast(error.message)}});
+    let profileRequest=0;
+    const chartColors=['#ddb900','#5378c4','#31866e','#bf627e','#8a6cb4','#b86d37'];
+    function fillProfileCardSelect(selected) {
+      const select=$('usualCard');
+      select.replaceChildren(new Option('Не выбрана',''),...carouselPos.all.map(card=>new Option(card.cardName||card.name,card.cardId)));
+      select.value=carouselPos.all.some(card=>card.cardId===selected)?selected:'';
+      select.disabled=false;
+    }
+    function renderProfileChart(cards,total) {
+      const legend=$('profileLegend');
+      legend.replaceChildren();
+      let offset=0;
+      const segments=[];
+      cards.forEach((card,index)=>{
+        const color=chartColors[index%chartColors.length];
+        if (total>0&&card.cashbackKopecks>0) {
+          const start=offset;
+          offset+=100*card.cashbackKopecks/total;
+          segments.push(color+' '+start+'% '+offset+'%');
+        }
+        const row=document.createElement('li');
+        row.style.setProperty('--card-color',color);
+        const caption=document.createElement('div');
+        const name=document.createElement('strong');
+        name.textContent=card.name+' · '+money(card.cashbackKopecks);
+        const info=document.createElement('small');
+        info.textContent=card.count+' шт. · Траты '+money(card.spentKopecks);
+        caption.append(name,info);row.append(caption);legend.append(row);
+      });
+      $('profileDonutTotal').textContent=money(total);
+      const donut=$('profileDonut');
+      if (segments.length) donut.style.setProperty('--chart-fill','conic-gradient('+segments.join(',')+')');
+      else donut.style.removeProperty('--chart-fill');
+    }
+    async function loadProfileStats() {
+      const request=++profileRequest;
+      $('profileStatsBody').hidden=$('profileRetry').hidden=true;
+      $('profileStatsStatus').textContent='Загружаем статистику…';
+      for (const id of ['profilePurchaseCount','profileCashback','profileMonth']) $(id).textContent=id==='profileMonth'?'':'—';
+      $('usualCard').disabled=true;
+      try {
+        const stats=await api('/api/me/stats');
+        if (request!==profileRequest) return;
+        const period=new Date(stats.month+'-01T00:00:00Z');
+        $('profileMonth').textContent=new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(period);
+        $('profilePurchaseCount').textContent=stats.count;
+        $('profileCashback').textContent=money(stats.calculatedKopecks);
+        $('profileRecommended').textContent=money(stats.recommendedKopecks);
+        $('profileMissed').textContent=money(stats.missedKopecks);
+        $('profileUsualComparison').hidden=stats.versusUsualKopecks==null;
+        if (stats.versusUsualKopecks!=null) $('profileUsualDifference').textContent=money(stats.versusUsualKopecks);
+        fillProfileCardSelect(stats.usualCardId);
+        renderProfileChart(stats.cards,stats.calculatedKopecks);
+        $('profileStatsStatus').textContent=stats.count?'':'Запишите покупку, чтобы увидеть статистику по картам.';
+        $('profileStatsBody').hidden=!stats.count;
+      } catch(error) {
+        if (request!==profileRequest) return;
+        $('profileStatsStatus').textContent='Не удалось загрузить статистику.';
+        $('profileRetry').hidden=false;
+      }
+    }
+    $('openProfile').onclick=()=>{
+      showWalletPanel('profilePanel');
+      $('profileLogin').textContent=deviceLogin||'';
+      $('profileCardCount').textContent=saved.length+manual.length;
+      $('profileComment').hidden=true;
+      $('profileTitle').focus();
+      loadProfileStats();
+    };
+    $('profileBack').onclick=()=>{showHome();$('openProfile').focus()};
+    $('profileRetry').onclick=loadProfileStats;
+    $('profileExplain').onclick=async()=>{
+      const button=$('profileExplain'),comment=$('profileComment');
+      button.disabled=true;comment.hidden=false;comment.textContent='Готовим разбор…';
+      try { comment.textContent=(await api('/api/me/stats/comment',{method:'POST'},45000)).comment; }
+      catch(error) { comment.textContent=error.message; }
+      finally { button.disabled=false; }
+    };
+    $('usualCard').onchange=async event=>{
+      const select=event.target;
+      select.disabled=true;
+      try {
+        await api('/api/me/usual-card',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cardId:select.value||null})});
+      } catch(error) { toast(error.message); }
+      await loadProfileStats();
+    };
+    document.addEventListener('wallet-updated',()=>{
+      $('profileCardCount').textContent=saved.length+manual.length;
+      if (!$('content').hidden&&!$('profilePanel').hidden&&!$('usualCard').disabled) fillProfileCardSelect($('usualCard').value);
+    });
     const originalLoad=load;
     load=async function(){await originalLoad();paintCategories();renderPurchaseCatalog();document.dispatchEvent(new Event('wallet-updated'))};
     for (const [name, read, write] of [['$',()=>$,null],['banks',()=>banks,value=>{banks=value}],['manual',()=>manual,value=>{manual=value}],['categories',()=>categories,value=>{categories=value}],['deviceLogin',()=>deviceLogin,value=>{deviceLogin=value}],['carouselPos',()=>carouselPos,null]]) Object.defineProperty(window,name,{get:read,set:write||(()=>{}),configurable:true});

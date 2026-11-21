@@ -692,12 +692,22 @@ def create_app(db_path):
         with connect(db_path) as db:
             usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
             raw = db.execute(f'''SELECT bought_on, category_id, amount_kopecks, recommended_name, recommended_kopecks,
-                chosen_name, chosen_kopecks, usual_kopecks FROM {wallet_purchase_table(db)}
+                chosen_name, chosen_kopecks, usual_kopecks, chosen_card FROM {wallet_purchase_table(db)}
                 WHERE session = ? AND bought_on LIKE ? ORDER BY id DESC''', (session, month + '%')).fetchall()
         items = [dict(date=row[0], categoryId=row[1], amountKopecks=row[2], recommendedName=row[3],
                       recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7])
                  for row in raw]
-        return {'month': month, 'usualCardId': usual[0] if usual else None, 'purchases': items, **month_totals(items),
+        by_card = {}
+        for row in raw:
+            card_id = row[8]
+            summary = by_card.setdefault(card_id, dict(cardId=card_id, name=row[5], count=0,
+                                                       spentKopecks=0, cashbackKopecks=0))
+            summary['count'] += 1
+            summary['spentKopecks'] += row[2]
+            summary['cashbackKopecks'] += row[6]
+        cards = sorted(by_card.values(), key=lambda card: (-card['cashbackKopecks'], card['name'], card['cardId']))
+        return {'month': month, 'usualCardId': usual[0] if usual else None, 'purchases': items, 'cards': cards,
+                **month_totals(items),
                 'note': 'Это расчёт по записанным покупкам, не начисление банка. Остаток месячного лимита по операциям не считаем.'}
 
     @app.put('/api/me/usual-card', status_code=204)
@@ -706,9 +716,16 @@ def create_app(db_path):
         if not session:
             return JSONResponse({'message': 'Войдите'}, 401)
         card = body.get('cardId')
-        if not isinstance(card, str) or not card:
+        if card is not None and (not isinstance(card, str) or not card):
             return JSONResponse({'message': 'Выберите карту'}, 422)
         with connect(db_path) as db:
+            if card is None:
+                db.execute('DELETE FROM usual_card WHERE session = ?', (session,))
+                return Response(status_code=204)
+            owns_card = db.execute('''SELECT 1 FROM manual_cards WHERE session=? AND card_id=?
+                UNION SELECT 1 FROM saved WHERE session=? AND cardId=?''', (session, card, session, card)).fetchone()
+            if not owns_card:
+                return JSONResponse({'message': 'Карта не найдена'}, 404)
             db.execute('INSERT INTO usual_card VALUES (?, ?) ON CONFLICT(session) DO UPDATE SET card_id = excluded.card_id',
                        (session, card))
         return Response(status_code=204)

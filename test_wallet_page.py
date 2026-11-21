@@ -47,12 +47,12 @@ class WalletPage(unittest.TestCase):
 
     def test_home_is_purchase_and_cards(self):
         self.assertIn('aria-label="Тема"', PAGE)
-        self.assertIn('aria-label="Настройки"', PAGE)
+        self.assertIn('id="openProfile"', PAGE)
         self.assertNotIn('>Тёмная<', PAGE)
         self.assertIn('id="openBuy"', PAGE)
         self.assertIn('id="openCards"', PAGE)
         self.assertIn('id="buyAmount"', PAGE)
-        self.assertIn('id="showStatsBtn"', PAGE)
+        self.assertIn('id="profilePanel" hidden', PAGE)
         self.assertIn('id="openPlan"', PAGE)
         self.assertIn('src="/wallet-cashback.js"', PAGE)
         self.assertIn("defineProperty(window,name", PAGE)
