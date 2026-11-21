@@ -26,3 +26,17 @@ class Calculation(unittest.TestCase):
     def test_dates(self):
         self.assertTrue(self.query(day='2026-11-01')['top3'])
         self.assertFalse(self.query(day='2027-11-01')['top3'])
+
+    def test_explanation_keeps_each_limit_stage_and_rounding(self):
+        from catalog import SEED
+
+        rule = dict(SEED[0], monthlyLimitKopecks=30000, monthlyRemainingKopecks=8000)
+        result = recommend('supermarkets', 250000, date(2026, 11, 20), [rule])['top3'][0]
+        self.assertEqual(result['calculation'], dict(amountKopecks=250000,
+                         beforeLimitsKopecks=25000, afterCategoryLimitKopecks=10000))
+        self.assertEqual(result['cashbackKopecks'], 8000)
+        self.assertTrue(result['limitApplied'])
+        self.assertTrue(result['monthlyLimitApplied'])
+        match = self.query(amount=105)['top3'][0]
+        self.assertEqual(match['calculation']['beforeLimitsKopecks'], 11)
+        self.assertEqual(match['cashbackKopecks'], 11)
