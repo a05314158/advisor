@@ -75,14 +75,45 @@ const checkout = (() => {
   }
   function recordForm(matches,value){
     const form=node('form',null,'record-form');const select=node('select');select.id='paidWith';select.required=true;select.append(new Option('Выберите карту',''));matches.forEach(r=>select.append(new Option(r.cardName,r.cardId)));
-    const l=node('label','Какой картой вы оплатили?');l.htmlFor=select.id;
+    const l=node('label','Карта для оплаты');l.htmlFor=select.id;
     const submit=node('button','Записать покупку','buy-primary');submit.type='submit';
-    const msg=node('p');msg.setAttribute('role','status');form.append(node('h4','Запись в историю'),node('p',`${label(selected)} · ${amountText(value)}. Просмотр совета не сохраняет покупку.`),l,select,submit,msg);
+    const msg=node('p');msg.setAttribute('role','status');form.append(node('h4','Покупка'),node('p',`${label(selected)} · ${amountText(value)}. Просмотр совета не сохраняет покупку.`),l,select,submit,msg);
+    const defer = button('Выбрать для оплаты и подтвердить позже', async () => {
+      if (recording || !form.reportValidity()) return;
+      const body = { chosenCardId: select.value, categoryId: selected, amountKopecks: value };
+      const signature = JSON.stringify(body);
+      const key = 'advisor-draft:' + deviceLogin;
+      let retry;
+      try { retry = JSON.parse(sessionStorage.getItem(key)); } catch {}
+      if (retry?.signature !== signature) {
+        retry = { signature, id: crypto.randomUUID() };
+        sessionStorage.setItem(key, JSON.stringify(retry));
+      }
+      recording = true;
+      submit.disabled = defer.disabled = select.disabled = true;
+      msg.textContent = 'Сохраняем черновик…';
+      try {
+        const draft = await purchaseReminders.create({ ...body, requestId: retry.id });
+        sessionStorage.removeItem(key);
+        field.value = '';
+        el('clearAmount').hidden = true;
+        results.replaceChildren();
+        status.textContent = 'Черновик сохранён.';
+        purchaseReminders.refresh();
+        purchaseReminders.open(draft.id);
+      } catch (error) {
+        msg.textContent = error.message;
+      } finally {
+        recording = false;
+        submit.disabled = defer.disabled = select.disabled = false;
+      }
+    });
+    submit.before(defer);
     form.onsubmit=async e=>{e.preventDefault();if(recording||!select.value)return;const body={chosenCardId:select.value,categoryId:selected,amountKopecks:value};const sig=JSON.stringify(body),key='advisor-purchase:'+deviceLogin;
       let receipt;try{receipt=JSON.parse(sessionStorage.getItem(key))}catch{}if(receipt?.sig!==sig){receipt={sig,id:crypto.randomUUID()};sessionStorage.setItem(key,JSON.stringify(receipt));}
-      recording=true;submit.disabled=true;msg.textContent='Записываем…';const ticket=epoch;
+      recording=true;submit.disabled=defer.disabled=true;msg.textContent='Записываем…';const ticket=epoch;
       try{await api('/api/me/purchases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,requestId:receipt.id})});sessionStorage.removeItem(key);if(epoch!==ticket){toast('Покупка записана');return;}field.value='';el('clearAmount').hidden=true;results.replaceChildren();status.textContent='Покупка записана. '+label(selected)+' · '+amountText(value);const next=button('Открыть историю',()=>showHistory());results.append(next);next.focus();}
-      catch{msg.textContent='Не удалось подтвердить запись. Повторите с теми же данными — дубля не будет.';}finally{recording=false;submit.disabled=false;}
+      catch{msg.textContent='Не удалось подтвердить запись. Повторите с теми же данными — дубля не будет.';}finally{recording=false;submit.disabled=defer.disabled=false;}
     };return form;
   }
   async function calculate(ticket,value){

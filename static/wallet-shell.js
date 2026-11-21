@@ -135,7 +135,7 @@ async function loadWalletData(){
     if(!carouselPos.all.length) $('carouselTrack').innerHTML='<div class="empty"><strong>Не удалось загрузить кошелёк</strong><span>Повторите загрузку.</span></div>';
   }
 }
-function expireSession(){deviceLogin=null; $('appScreen').hidden=true; $('authScreen').hidden=false; $('welcomeScreen').hidden=true; showRemembered();}
+function expireSession(){deviceLogin=null; purchaseReminders.reset(); $('appScreen').hidden=true; $('authScreen').hidden=false; $('welcomeScreen').hidden=true; showRemembered();}
 function openDialog(dialog, focus, source){walletReturn=source||document.activeElement; dialog.hidden=false; focus?.focus();}
 function closeDialog(dialog){dialog.hidden=true; if(walletReturn?.isConnected) walletReturn.focus();}
 function trap(dialog){if(!dialog) return; dialog.addEventListener('keydown',event=>{
@@ -254,6 +254,8 @@ async function renderHomeCashback(){
     host.append(grid, cashbackText('p', data.actualCashbackCount
       ? `Подтверждено по ${data.actualCashbackCount} из ${data.count} записанных покупок`
       : 'Нет подтверждённых начислений', 'month-cashback-meta'));
+    const missing = data.purchases?.filter(purchase => purchase.estimateAvailable === false).length || 0;
+    if (missing) host.append(cashbackText('p', `Покупок без оценки кэшбэка: ${missing}`, 'month-cashback-meta'));
     if (data.cards?.length){
       const breakdown = document.createElement('details');
       breakdown.className = 'month-cashback-cards';
@@ -394,12 +396,12 @@ async function renderHistory(){
         if(gap>0){const extra=document.createElement('span'); extra.className='journal-gap'; extra.textContent=`Можно было получить ещё ${money(gap)}`; main.append(extra);}
         const moneyCol=document.createElement('span'); moneyCol.className='journal-money';
         const amount=document.createElement('strong'); amount.className='money'; amount.textContent=money(item.amountKopecks);
-        const cash=document.createElement('span'); cash.className='journal-cash'; cash.textContent=item.chosenKopecks==null?'':`+${money(item.chosenKopecks)} кэшбэка`;
+        const cash=document.createElement('span'); cash.className='journal-cash'; cash.textContent=item.estimateAvailable===false?'Расчёт недоступен':item.chosenKopecks==null?'':`+${money(item.chosenKopecks)} кэшбэка`;
         moneyCol.append(amount, cash); row.append(main, moneyCol);
         const detail=document.createElement('div'); detail.className='journal-detail'; detail.hidden=true;
-        const chosen=document.createElement('p'); chosen.textContent=`Выбранная карта: ${item.chosenName||'—'}${item.chosenKopecks==null?'':`, ${money(item.chosenKopecks)}`}`;
-        const best=document.createElement('p'); best.textContent=`Лучшая по расчёту: ${item.recommendedName||'—'}${item.recommendedKopecks==null?'':`, ${money(item.recommendedKopecks)}`}`;
-        const diff=document.createElement('p'); diff.textContent=`Разница: ${item.recommendedKopecks==null||item.chosenKopecks==null?'—':money(gap)}`;
+        const chosen=document.createElement('p'); chosen.textContent=`Выбранная карта: ${item.chosenName||'—'}${item.estimateAvailable===false||item.chosenKopecks==null?'':`, ${money(item.chosenKopecks)}`}`;
+        const best=document.createElement('p'); best.textContent=`Лучшая по расчёту: ${item.estimateAvailable===false?'—':item.recommendedName||'—'}${item.estimateAvailable===false||item.recommendedKopecks==null?'':`, ${money(item.recommendedKopecks)}`}`;
+        const diff=document.createElement('p'); diff.textContent=`Разница: ${item.estimateAvailable===false||item.recommendedKopecks==null||item.chosenKopecks==null?'—':money(gap)}`;
         detail.append(chosen, best, diff);
         if (item.id != null) detail.append(actualCashbackForm(item));
         row.onclick=()=>{detail.hidden=!detail.hidden; row.setAttribute('aria-expanded', String(!detail.hidden));};
@@ -583,9 +585,12 @@ window.shellCheckAuth=async function(){
     if(user.authenticated){
       $('welcomeScreen').hidden=true; $('authScreen').hidden=true; $('appScreen').hidden=false;
       deviceLogin=user.login; $('authPassword').value='';
-      syncWalletRoute(forceHome); await load();
+      syncWalletRoute(forceHome || !!purchaseReminders.deepLink()); await load();
+      if(deviceLogin) purchaseReminders.enter();
     }else{
-      $('welcomeScreen').hidden=false; $('authScreen').hidden=true; $('appScreen').hidden=true;
+      const draft = purchaseReminders.deepLink();
+      $('welcomeScreen').hidden=!!draft; $('authScreen').hidden=!draft; $('appScreen').hidden=true;
+      if(draft){showRemembered(); setAuthMode('login');}
     }
   }catch(error){
     showSessionGate('Не удалось проверить вход', true);

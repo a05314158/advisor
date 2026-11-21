@@ -188,7 +188,7 @@ def catalog_scenario(page, directory):
 
 
 def record_once(page, base, card_name):
-    paid = page.get_by_label('Какой картой вы оплатили?')
+    paid = page.get_by_label('Карта для оплаты')
     expect(paid).to_have_value('')
     paid.select_option(label=card_name)
     submit = button(page, 'Записать покупку')
@@ -339,6 +339,74 @@ def cashback_summary_scenario(page):
     expect(summary).to_contain_text('Нет подтверждённых начислений')
 
 
+def purchase_reminder_scenario(browser, base, directory):
+    context = browser.new_context(base_url=base, viewport={'width': 390, 'height': 844},
+                                  locale='ru-RU', reduced_motion='reduce')
+    try:
+        page = context.new_page()
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        login, password = 'reminder_' + uuid4().hex[:10], uuid4().hex
+        response = page.request.post('/api/auth/register', data={'login': login, 'password': password})
+        assert response.ok, response.text()
+        card = page.request.post('/api/me/manual-cards', data={
+            'name': 'Карта для проверки',
+            'rules': [{'categoryId': 'cafe', 'rateBps': 500}],
+        }).json()['cardId']
+        page.goto(base + '/#buy')
+        expect(page.locator('#buyTitle')).to_be_visible()
+        worker_path = page.evaluate('''async () => Promise.race([
+            navigator.serviceWorker.ready.then(registration => registration.active.scriptURL),
+            new Promise(resolve => setTimeout(() => resolve(null), 6500)),
+        ])''')
+        assert worker_path == base + '/sw.js', worker_path
+        assert page.request.get('/manifest.webmanifest').json()['display'] == 'standalone'
+
+        def draft():
+            category(page, 'Кафе')
+            page.locator('#buyAmount').fill('960')
+            page.locator('#paidWith').select_option(card)
+            assert page.request.get('/api/me/purchase-drafts').json()['drafts'] == []
+            button(page, 'Выбрать для оплаты и подтвердить позже').click()
+            expect(page.locator('#purchaseDraftTitle')).to_have_text('Оплатили покупку?')
+            return page.url
+
+        deep_link = draft()
+        assert page.request.get('/api/me/stats').json()['count'] == 0
+        screenshots(page, directory, 'purchase-reminder')
+        button(page, 'Закрыть подтверждение').click()
+        expect(page.locator('#purchaseDraftDetail')).to_be_hidden()
+        expect(page.locator('#purchaseDrafts').get_by_role('button')).to_have_count(1)
+        assert page.request.get('/api/me/push').json() == {'publicKey': None}
+
+        context.clear_cookies()
+        page.goto(deep_link)
+        expect(page.locator('#authTitle')).to_have_text('Войти')
+        form = page.locator('#authForm')
+        form.get_by_label('Логин').fill(login)
+        form.get_by_label('Пароль', exact=True).fill(password)
+        button(form, 'Войти').click()
+        expect(page.locator('#purchaseDraftTitle')).to_have_text('Оплатили покупку?')
+        button(page.locator('#purchaseDraftDetail'), 'Изменить').click()
+        page.get_by_label('Сумма, ₽', exact=True).fill('800,50')
+        button(page, 'Подтвердить с изменениями').click()
+        expect(page.locator('#purchaseDraftTitle')).to_have_text('Покупка записана')
+        button(page, 'Открыть историю').click()
+        expect(page.locator('.journal-row')).to_have_count(1)
+        assert page.request.get('/api/me/stats').json()['purchases'][0]['amountKopecks'] == 80050
+        page.goto(deep_link)
+        expect(page.locator('#purchaseDraftTitle')).to_have_text('Покупка записана')
+
+        page.goto(base + '/#buy')
+        draft()
+        button(page, 'Нет, не оплатил').click()
+        expect(page.locator('#purchaseDraftTitle')).to_have_text('Черновик закрыт')
+        assert page.request.get('/api/me/stats').json()['count'] == 1
+        assert not errors, errors
+    finally:
+        context.close()
+
+
 def run_cashback_summary(chromium):
     with isolated_server() as base, sync_playwright() as runtime:
         browser = runtime.chromium.launch(executable_path=chromium)
@@ -396,6 +464,7 @@ def run(chromium, directory, revision):
                 expect(page.locator('#openBuy')).to_be_visible()
                 screenshots(page, directory, 'home-empty')
                 expect(page.locator('#openBuy')).to_have_accessible_name('Сравнить карты')
+                purchase_reminder_scenario(browser, base, directory)
                 purchase_plan_scenario(page)
                 catalog_scenario(page, directory)
                 for card in 'ABCD':

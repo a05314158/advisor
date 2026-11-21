@@ -41,3 +41,14 @@ html[data-theme=dark] #buyPanel{--sheet:#232421;--stroke:#949289;--quiet:#c7c4ba
 #purchasePlanResult li{padding-block:6px;overflow-wrap:anywhere}
 #purchasePlanResult li span{display:block}
 .purchase-plan-gain{font-weight:700}
+
+.purchase-drafts { display: grid; gap: 8px; }
+.purchase-drafts > button { text-align: left; overflow-wrap: anywhere; }
+.purchase-draft-detail { margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }
+.purchase-draft-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.purchase-draft-heading h3 { margin: 0; }
+.purchase-draft-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.purchase-draft-detail p, #purchasePushStatus { color: var(--muted); overflow-wrap: anywhere; }
+.purchase-draft-detail p:empty, #purchasePushStatus:empty, .purchase-drafts:empty { display: none; }
+.purchase-draft-detail .shot-form input, .purchase-draft-detail .shot-form select { background: var(--bg); color: var(--ink); }
+#purchasePushToggle { margin-top: 8px; }

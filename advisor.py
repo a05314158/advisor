@@ -23,6 +23,7 @@ from cashback_planner import mount_planner
 from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows, wallet_purchase_table
 from observability import mount_observability
 from purchase_plan import MAX_PURCHASES, allocate_purchases
+from purchase_reminders import mount_reminders, reminder_worker, setup_reminders
 PAGE = Path(__file__).with_name('wallet.html')
 SCRIPT = Path(__file__).with_name('wallet-cashback.js')
 BUILD_REVISION = '$Format:%H$'
@@ -232,7 +233,10 @@ def create_app(db_path):
     @asynccontextmanager
     async def lifespan(_):
         initialize(db_path)
-        yield
+        with connect(db_path) as db:
+            setup_reminders(db)
+        async with reminder_worker(db_path):
+            yield
 
     app = FastAPI(title='Советник', lifespan=lifespan)
     app.mount('/static', StaticFiles(directory=PAGE.parent / 'static'), name='static')
@@ -242,6 +246,16 @@ def create_app(db_path):
     @app.get('/')
     def home():
         return FileResponse(PAGE)
+
+    @app.get('/sw.js', include_in_schema=False)
+    def service_worker():
+        return FileResponse(PAGE.parent / 'static' / 'sw.js', media_type='text/javascript',
+                            headers={'Cache-Control': 'no-cache'})
+
+    @app.get('/manifest.webmanifest', include_in_schema=False)
+    def manifest():
+        return FileResponse(PAGE.parent / 'static' / 'manifest.webmanifest',
+                            media_type='application/manifest+json')
 
     @app.get('/android-bank-test', include_in_schema=False)
     @app.get('/bank-link-test', include_in_schema=False)
@@ -754,6 +768,43 @@ def create_app(db_path):
             user = db.execute('SELECT 1 FROM users WHERE session = ?', (session,)).fetchone()
         return session if user else None
 
+    def write_purchase(db, session, day, category, amount, result, picked, usual_id):
+        best = result['top3'][0] if result['top3'] else picked
+        usual_hit = next((item for item in result['allMatches'] if item['cardId'] == usual_id), None)
+        entry = db.execute(f'''INSERT INTO {wallet_purchase_table(db)}
+            (session, bought_on, category_id, amount_kopecks,
+             recommended_card, recommended_name, recommended_kopecks,
+             chosen_card, chosen_name, chosen_kopecks, usual_kopecks, catalog_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (session, day.isoformat(), category, amount,
+             best['cardId'], best['cardName'], best['cashbackKopecks'],
+             picked['cardId'], picked['cardName'], picked['cashbackKopecks'],
+             None if usual_hit is None else usual_hit['cashbackKopecks'],
+             result['catalogVersion']))
+        return {'id': entry.lastrowid, 'calculatedKopecks': picked['cashbackKopecks'],
+                'recommendedKopecks': best['cashbackKopecks']}
+
+    def draft_snapshot(db, request, category, day):
+        rules, own = owned_rules(db, request, today=day)
+        if not known_category(category, rules, own):
+            return {'cards': {}}
+        cards = {card: card_info(card)['cardName'] for card in sorted(own)}
+        cards.update({card['cardId']: card['name'] for card in manual_cards(db, request)})
+        session = session_id(request)
+        caps = personal_caps(db, session, day.strftime('%Y-%m'))
+        usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
+        return dict(rules=[rule for rule in rules if rule['cardId'] in own],
+                    cards=cards, caps=caps, usual=usual[0] if usual else None, quoteDay=day.isoformat())
+
+    def rank_draft(category, amount, day, snapshot, original_day):
+        # A draft captures conditions and balances for one date only.
+        if day != original_day:
+            return dict(top3=[], allMatches=[], catalogVersion='draft-estimate-unavailable')
+        return recommend(category, amount, date.fromisoformat(snapshot['quoteDay']), snapshot['rules'],
+                         snapshot['cards'], snapshot['caps'])
+
+    mount_reminders(app, db_path, require_user, draft_snapshot, rank_draft, write_purchase)
+
     @app.post('/api/me/purchases', status_code=201)
     def record_purchase(body: dict, request: Request):
         session = require_user(request)
@@ -790,20 +841,8 @@ def create_app(db_path):
                 picked = next((item for item in result['allMatches'] if item['cardId'] == chosen), None)
                 if not picked:
                     return JSONResponse({'message': 'Эта карта не даёт кэшбэк в выбранной категории'}, 422)
-                best = result['top3'][0]
                 usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
-                usual_hit = next((item for item in result['allMatches'] if usual and item['cardId'] == usual[0]), None)
-                entry = db.execute(f'''INSERT INTO {wallet_purchase_table(db)}
-                    (session, bought_on, category_id, amount_kopecks,
-                     recommended_card, recommended_name, recommended_kopecks,
-                     chosen_card, chosen_name, chosen_kopecks, usual_kopecks, catalog_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (session, today.isoformat(), category, amount,
-                     best['cardId'], best['cardName'], best['cashbackKopecks'],
-                     picked['cardId'], picked['cardName'], picked['cashbackKopecks'],
-                     None if usual_hit is None else usual_hit['cashbackKopecks'],
-                     result['catalogVersion']))
-                payload = {'id': entry.lastrowid, 'calculatedKopecks': picked['cashbackKopecks'], 'recommendedKopecks': best['cashbackKopecks']}
+                payload = write_purchase(db, session, today, category, amount, result, picked, usual[0] if usual else None)
                 if request_key is not None:
                     monthly.remember(db, session, 'purchase', request_key, digest, payload)
                 return payload
@@ -845,12 +884,13 @@ def create_app(db_path):
         with connect(db_path) as db:
             usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
             raw = db.execute(f'''SELECT bought_on, category_id, p.amount_kopecks, recommended_name, recommended_kopecks,
-                chosen_name, chosen_kopecks, usual_kopecks, chosen_card, p.id, a.amount_kopecks
+                chosen_name, chosen_kopecks, usual_kopecks, chosen_card, p.id, a.amount_kopecks, catalog_version
                 FROM {wallet_purchase_table(db)} p LEFT JOIN wallet_actual_cashback a
                 ON a.session=p.session AND a.purchase_id=p.id
                 WHERE p.session = ? AND bought_on LIKE ? ORDER BY p.id DESC''', (session, month + '%')).fetchall()
         items = [dict(date=row[0], categoryId=row[1], amountKopecks=row[2], recommendedName=row[3],
-                      recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7], cardId=row[8], id=row[9], actualCashbackKopecks=row[10])
+                      recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7], cardId=row[8], id=row[9], actualCashbackKopecks=row[10],
+                      **({'estimateAvailable': False} if row[11] == 'draft-estimate-unavailable' else {}))
                  for row in raw]
         by_card = {}
         for item in items:
