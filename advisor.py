@@ -400,7 +400,7 @@ def create_app(db_path):
         card = 'manual-' + secrets.token_hex(12)
         today = datetime.now(UTC).date().isoformat()
         with connect(db_path) as db:
-            db.execute('INSERT INTO manual_cards VALUES (?, ?, ?, ?, ?)',
+            db.execute('INSERT INTO manual_cards(session,card_id,name,updated_on,rules_json) VALUES (?, ?, ?, ?, ?)',
                        (session, card, name.strip(), today, json.dumps(cleaned)))
         response = JSONResponse({'cardId': card}, 201)
         response.set_cookie(COOKIE, session, httponly=True, samesite='strict', max_age=31536000, path='/',
@@ -458,7 +458,10 @@ def create_app(db_path):
             if status in (401, 403):
                 return JSONResponse({'message': 'Сервис распознавания не принял ключ'}, 502)
             return JSONResponse({'message': 'Не удалось разобрать категории. Попробуйте ещё раз'}, 502)
-        except (httpx.HTTPError, KeyError, TypeError, RuntimeError) as error:
+        except RuntimeError:
+            logging.getLogger('advisor').warning('cashback recognition is not configured')
+            return JSONResponse({'message': 'Распознавание на стенде не настроено. Введите условия вручную'}, 503)
+        except (httpx.HTTPError, KeyError, TypeError) as error:
             logging.getLogger('advisor').warning('cashback %s', type(error).__name__)
             return JSONResponse({'message': 'Не удалось разобрать категории. Попробуйте ещё раз'}, 502)
         return rules if isinstance(rules, dict) else {'rules': rules}
@@ -489,7 +492,7 @@ def create_app(db_path):
         with connect(db_path) as db:
             if not db.execute('SELECT 1 FROM rules WHERE cardId = ? LIMIT 1', (card,)).fetchone():
                 return JSONResponse({'code': 'unknown_card'}, 404)
-            db.execute('INSERT OR IGNORE INTO saved VALUES (?, ?)', (session, card))
+            db.execute('INSERT OR IGNORE INTO saved(session,cardId) VALUES (?, ?)', (session, card))
         response = Response(status_code=204)
         response.set_cookie(COOKIE, session, httponly=True, samesite='strict', max_age=31536000, path='/',
                             secure=request.url.scheme == 'https')
