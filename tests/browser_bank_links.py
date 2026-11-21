@@ -12,11 +12,23 @@ with sync_playwright() as p:
     errors=[]
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(args.base_url.rstrip('/') + '/bank-link-test')
+    direct = {'tbank://main', 'tinkoffbank://Main', 'wheels://Main'}
+    sber = 'https://v.sber.ru/sms/forlifestyle?from=siteteaser'
+    shortcuts = {f'shortcuts://run-shortcut?name={name}' for name in ('OpenSber', 'OpenTBank', 'OpenAlfa', 'OpenVTB')}
     page.locator('#platform').select_option('ios')
-    assert page.locator('.launch').count()==8
-    assert page.locator('.launch').first.get_attribute('href')=='tinkoffbank://Main'
+    ios_links = page.locator('.launch').evaluate_all('(xs) => xs.map(x => x.getAttribute("href"))')
+    assert len(ios_links) == len(set(ios_links))
+    assert direct | shortcuts | {sber} <= set(ios_links)
+    assert page.locator('#shortcutHelp').is_visible()
+    shortcut = page.get_by_role('link', name='Команда OpenSber')
+    shortcut.evaluate('(a) => a.addEventListener("click", event => event.preventDefault())')
+    shortcut.click()
+    page.get_by_label('Результат: Команда OpenSber').select_option(label='Открылась главная банка')
     page.locator('#platform').select_option('android')
-    links=page.locator('.launch').evaluate_all('(xs)=>xs.map(x=>x.getAttribute("href"))')
+    android_links = page.locator('.launch').evaluate_all('(xs) => xs.map(x => x.getAttribute("href"))')
+    assert set(url for url in android_links if not url.startswith('intent://')) == direct | {sber}
+    assert not page.locator('#shortcutHelp').is_visible()
+    links = [url for url in android_links if url.startswith('intent://')]
     assert len(links)==6
     for url in links:
         assert 'scheme=' in url and 'package=' in url
@@ -24,15 +36,20 @@ with sync_playwright() as p:
         assert url.endswith(';end')
     fallback_hosts = {urlsplit(unquote(url.split('S.browser_fallback_url=', 1)[1][:-4])).hostname for url in links}
     assert fallback_hosts == {'www.tbank.ru', 'online.sberbank.ru', 'web.alfabank.ru', 'online.vtb.ru'}
-    page.locator('.launch').first.evaluate('(a)=>a.addEventListener("click",e=>e.preventDefault())')
-    page.locator('.launch').first.click()
-    page.locator('select[aria-label]').first.select_option(label='Открылся сайт')
+    official = page.get_by_role('link', name='Официальная ссылка Сбера')
+    official.evaluate('(a) => a.addEventListener("click", event => event.preventDefault())')
+    official.click()
+    page.get_by_label('Результат: Официальная ссылка Сбера').select_option(label='Открылся сайт')
+    page.reload()
     page.locator('#export').click()
     report=json.loads(page.locator('#report').input_value())
-    assert len(report['records'])==1
-    assert report['records'][0]['app']=='CraftT'
-    assert report['records'][0]['result']=='Открылся сайт'
+    assert len(report['records']) == 2
+    assert report['records'][0]['url'] == 'shortcuts://run-shortcut?name=OpenSber'
+    assert report['records'][0]['platform'] == 'ios'
+    assert report['records'][1]['url'] == sber
+    assert report['records'][1]['platform'] == 'android'
+    assert report['records'][1]['result'] == 'Открылся сайт'
     assert not errors,errors
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-    print('PASS: iOS/Android rendering, 6 Android intents and HTTPS fallbacks, explicit outcome recording, JSON export, mobile width. External app opening was NOT tested.')
+    print('PASS: exact bank links, iOS shortcuts, Android intents and fallbacks, saved outcomes, mobile width. Device launches require a phone.')
     browser.close()
