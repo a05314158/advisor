@@ -363,6 +363,7 @@ def purchase_reminder_scenario(browser, base, directory):
         assert page.request.get('/manifest.webmanifest').json()['display'] == 'standalone'
 
         def draft():
+            expect(page.locator('#categoryGrid')).to_be_visible()
             category(page, 'Кафе')
             page.locator('#buyAmount').fill('960')
             page.locator('#paidWith').select_option(card)
