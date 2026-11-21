@@ -22,7 +22,8 @@ def check(base, executable=None):
                 return dict(label=label,categoryId=cid,rateBps=rate,limitKopecks=None,minAmountKopecks=minimum,selected=True,uncertain=False)
             body = dict(bankId='sber',month=datetime.now(UTC).strftime('%Y-%m'),mode='active',slots=3,requestId=uuid4().hex,
                         rules=[rule('Транспорт','transport',1500,10000),rule('На все покупки','all',100),rule('АЗС','fuel',0)])
-            assert page.request.post(base+'/api/me/cashback-confirm',data=body).ok
+            saved = page.request.post(base+'/api/me/cashback-confirm',data=body)
+            assert saved.ok
             page.goto(base);page.locator('#openBuy').click()
             page.locator('#categoryGrid').get_by_role('button',name='Транспорт',exact=True).click()
             field=page.locator('#buyAmount'); val=page.locator('#buyResults .advice-value').first
@@ -40,6 +41,16 @@ def check(base, executable=None):
             page.unroute('**/api/recommendations');page.get_by_role('button',name='Повторить расчёт').click();expect(val).to_have_text('0 ₽')
             page.locator('#changeCategory').click();page.locator('#categoryGrid').get_by_role('button',name='Транспорт',exact=True).click()
             field.fill('123');field.fill('124');field.fill('1000');expect(val).to_have_text('150 ₽');expect(field).to_be_focused()
+            card_id = saved.json()['cardId']
+            limits = page.request.put(base+f'/api/me/cards/{card_id}/monthly', data={'limitKopecks':50000,'usedKopecks':40000})
+            assert limits.ok
+            field.fill('2500')
+            expect(val).to_have_text('100 ₽')
+            winner = page.locator('.advice-winner')
+            expect(winner).to_contain_text('По ставке 375 ₽. Остаток месяца — 100 ₽.')
+            winner.get_by_text('Условия', exact=True).click()
+            expect(winner.locator('dt').get_by_text('Остаток месяца', exact=True).locator('xpath=following-sibling::dd[1]')).to_have_text('100 ₽')
+            expect(winner.locator('dt').get_by_text('Ожидаемый кэшбэк', exact=True).locator('xpath=following-sibling::dd[1]')).to_have_text('100 ₽')
             assert not errors, errors
         finally:
             browser.close()

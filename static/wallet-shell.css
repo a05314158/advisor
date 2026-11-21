@@ -38,7 +38,9 @@ html[data-theme=dark], html[data-theme=dark] body { background: #151613; color: 
   box-shadow: 0 8px 16px rgba(29, 30, 26, .16), inset 0 1px 0 rgba(255, 255, 255, .35);
 }
 .home-plan #planForecast { color: var(--ink); font-weight: 650; }
-#emptyAdd { min-height: 44px; margin-top: 8px; padding: 0; background: transparent; color: var(--ink); font-weight: 700; }
+#homeGuide { margin: 0 0 16px; max-width: 38ch; font-size: 15px; line-height: 1.45; }
+#emptyAdd { width: 100%; min-height: 44px; margin-top: 8px; padding: 0 12px; border: 1px solid currentColor; border-radius: 14px; background: transparent; color: inherit; font-weight: 700; }
+#carouselSummary .card-next-step { min-height: 44px; justify-self: start; }
 
 .wallet-status { margin: 8px auto; color: var(--quiet); }
 .password-field { display: flex; gap: 8px; align-items: center; }

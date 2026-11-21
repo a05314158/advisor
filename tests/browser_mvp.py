@@ -213,10 +213,8 @@ def personal_scenario(page, base, directory):
     expect(details).to_contain_text('Карта A')
     carousel.press('ArrowRight')
     expect(details).to_contain_text('ВТБ')
-    button(cards, 'Действия с картой').click()
-    button(cards, 'Добавить условия кэшбэка').click()
+    button(cards, 'Указать категорию и ставку').click()
     review = page.locator('#catalogDialog')
-    button(review, re.compile('подключённые')).click()
     button(review, 'Ввести условия вручную').click()
     review.locator('#reviewSlots').fill('2', force=True)
     for i, (label, code, rate) in enumerate([('Транспорт', 'transport', '15'), ('На все покупки', 'all', '1')]):

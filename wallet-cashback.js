@@ -37,6 +37,10 @@
     cardOptions(c?.cardId); showStep('decisionStep','Условия кэшбэка','bankId');
   }
   $('addCashbackBtn').addEventListener('click',e=>openDecision(e.currentTarget));
+  document.addEventListener('wallet-card-setup',event=>{
+    openDecision(event.detail);
+    choose('active');
+  });
   $('bankId').onchange=()=>cardOptions();
   function choose(value){
     const bankId=$('bankId').value, cardId=$('cashbackCard').value;

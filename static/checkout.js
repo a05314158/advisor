@@ -50,7 +50,7 @@ const checkout = (() => {
     });
     el('moreCategories').hidden=!expanded||ids.length<=6;el('moreCategories').textContent=more?'Скрыть остальные категории':'Все категории';el('moreCategories').setAttribute('aria-expanded',String(more));
     document.querySelectorAll('[data-scope]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scope===scope)));
-    el('scopeNote').textContent=scope==='all'?'Учебные предложения. Это сравнение, а не оформление карты.':'Сравниваем только карты из вашего кошелька.';
+    el('scopeNote').textContent=scope==='all'?'Пример расчёта на учебных картах.':'Сравниваем карты и ставки, которые вы добавили.';
   }
   function setScope(mode){scope=mode;paint();queue();}
   function term(host,name,value){host.append(node('dt',name),node('dd',value));}
@@ -59,11 +59,25 @@ const checkout = (() => {
     const title=node('h4',r.bankName===r.cardName?r.cardName:`${r.bankName} · ${r.cardName}`);
     const val=node('strong',amountText(r.cashbackKopecks),'advice-value');article.append(title,val);
     const ruleName=r.label||label(r.categoryId);const rate=formatRate(r.rateBps)+'%';
-    article.append(node('p',label(selected),'advice-cat'),node('p',`${r.categoryId==='all'&&selected!=='all'?'Запасное правило «На все покупки»':`Правило «${ruleName}»`}: ${rate}.${r.limitApplied?' Возврат ограничен лимитом '+amountText(r.limitKopecks)+'.':''}`));
+    const calc=r.calculation;
+    const ruleCapped=calc?.afterCategoryLimitKopecks<calc?.beforeLimitsKopecks;
+    const monthCapped=calc?.monthlyRemainingKopecks!=null&&calc.monthlyRemainingKopecks<calc.afterCategoryLimitKopecks;
+    const explanation=monthCapped
+      ? `По ставке ${amountText(calc.beforeLimitsKopecks)}. Остаток месяца — ${amountText(calc.monthlyRemainingKopecks)}.`
+      : ruleCapped ? `По ставке ${amountText(calc.beforeLimitsKopecks)}. Лимит категории — ${amountText(calc.afterCategoryLimitKopecks)}.` : '';
+    if (!index&&r.cashbackKopecks>0) article.prepend(node('p','Лучший кэшбэк','buy-note'));
+    article.append(node('p',label(selected),'advice-cat'),node('p',`${r.categoryId==='all'&&selected!=='all'?'Ставка на все покупки':ruleName} · ${rate}`));
+    if(explanation) article.append(node('p',explanation));
     if(all.some((x,i)=>i!==index&&x.cashbackKopecks===r.cashbackKopecks))article.append(node('p','Ещё одна карта даёт такой же возврат.','buy-note'));
     const details=node('details'), dl=node('dl');details.append(node('summary','Условия'),dl);
     term(dl,'Ставка',rate);term(dl,'Категория правила',ruleName);term(dl,'Минимальная покупка',r.minAmountKopecks==null?'Не указана':amountText(r.minAmountKopecks));
-    term(dl,'Лимит правила',r.limitKopecks===null?'Без ограничения':r.limitKopecks===undefined?'Неизвестен':`${amountText(r.limitKopecks)} · ${r.limitApplied?'применён':'не применён'}`);
+    term(dl,'Лимит правила',r.limitKopecks===null?'Без ограничения':r.limitKopecks===undefined?'Неизвестен':`${amountText(r.limitKopecks)} · ${ruleCapped?'применён':'не применён'}`);
+    if(calc) {
+      term(dl,'По ставке',amountText(calc.beforeLimitsKopecks));
+      if(ruleCapped) term(dl,'После лимита категории',amountText(calc.afterCategoryLimitKopecks));
+      if(calc.monthlyRemainingKopecks!=null) term(dl,'Остаток месяца',amountText(calc.monthlyRemainingKopecks));
+      term(dl,'Ожидаемый кэшбэк',amountText(r.cashbackKopecks));
+    }
     term(dl,'Период',`${r.validFrom?'С '+day(r.validFrom):'Начало неизвестно'}${r.validUntilExclusive?' до '+day(r.validUntilExclusive)+' (не включая)':' · конец не указан'}`);
     term(dl,'Актуальность',r.updatedOn?day(r.updatedOn):'Дата не указана');const sources={catalog:'Учебный каталог',manual:'Условия из вашего кошелька',confirmed:'Подключённые условия'};term(dl,'Источник',sources[r.source]||r.source||(!String(r.cardId||'').startsWith('manual-')?'Учебный каталог':'Условия из вашего кошелька'));article.append(details);
     if(index===0&&scope==='mine'&&r.bankAccess?.webUrl){const a=node('a','Открыть официальный сайт банка');a.href=r.bankAccess.webUrl;a.rel='noopener noreferrer';a.target='_blank';article.append(a);}

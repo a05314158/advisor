@@ -31,8 +31,15 @@ function renderWalletCardDetails(card){
   if(card.demo) host.append(Object.assign(document.createElement('small'),{textContent:'Ставки демонстрационные'}));
   const rules=card.rules||[];
   const text=document.createElement('small');
-  text.textContent=rules.length?rules.slice(0,3).map(ruleLine).join(', '):(document.documentElement.dataset.demo==='cards'?'': 'Добавить условия');
+  text.textContent=rules.length?rules.slice(0,3).map(ruleLine).join(', '):(document.documentElement.dataset.demo==='cards'?'': 'Без условий кэшбэка карта не участвует в сравнении.');
   host.append(text);
+  if (!rules.length && card.kind==='manual' && !card.demo) {
+    const action=document.createElement('button');
+    action.type='button'; action.className='text-action card-next-step';
+    action.textContent='Указать категорию и ставку';
+    action.addEventListener('click',()=>document.dispatchEvent(new CustomEvent('wallet-card-setup',{detail:action})));
+    host.append(action);
+  }
   if(rules.length>3){
     const more=document.createElement('button'); more.type='button'; more.className='text-action'; more.textContent='Все категории'; more.setAttribute('aria-expanded','false');
     const rest=document.createElement('small'); rest.hidden=true; rest.textContent=rules.map(ruleLine).join(', ');
