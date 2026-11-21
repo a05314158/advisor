@@ -1,0 +1,41 @@
+class="wallet-nav" aria-label="Разделы кошелька"><button type="button" data-route="home" aria-current="page">Кошелёк</button><button type="button" data-route="buy">Покупка</button><button type="button" data-route="history">История</button></nav><div class="wallet-status" role="status" aria-live="polite"><span id="walletStatus"></span><button id="retryWallet" type="button" hidden>Повторить загрузку</button></div>
+    <section class="hero pocket-hero" id="hero" aria-label="Кошелёк">
+      <div class="scene">
+        <div class="wallet">
+          <svg viewBox="0 0 390 330" aria-hidden="true">
+      <defs>
+        <linearGradient id="leather" x2=".17" y2="1">
+          <stop stop-color="#3a3430"/>
+          <stop offset=".21" stop-color="#282521"/>
+          <stop offset=".66" stop-color="#1b1917"/>
+          <stop offset="1" stop-color="#100f0e"/>
+        </linearGradient>
+        <linearGradient id="edge" x2=".85" y2="1">
+          <stop stop-color="#817469"/>
+          <stop offset=".30" stop-color="#484039"/>
+          <stop offset=".72" stop-color="#171411"/>
+          <stop offset="1" stop-color="#5e5348"/>
+        </linearGradient>
+        <radialGradient id="shadow">
+          <stop stop-color="#000" stop-opacity=".88"/>
+          <stop offset="1" stop-color="#000" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="grain">
+          <feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" seed="13" stitchTiles="stitch"/>
+          <feColorMatrix type="saturate" values="0"/>
+        </filter>
+        <path id="pocket" d="M43 72 Q45 51 68 51 Q192 43 322 57 Q346 59 347 82 L343 210 Q342 251 304 256 Q190 267 80 252 Q44 247 41 213 Q37 146 43 72Z"/>
+        <clipPath id="pocket-mask"><use href="#pocket"/></clipPath>
+      </defs>
+      <ellipse cx="194" cy="257" rx="184" ry="35" fill="url(#shadow)"/>
+      <g class="wallet-body">
+      <g class="rear">
+        <path d="M46 90 Q44 62 69 49 Q191 12 320 50 Q344 58 344 89 L336 200 H50Z" fill="#292622" stroke="#514943" stroke-width="1.8"/>
+        <path d="M62 57 Q189 23 324 56" fill="none" stroke="#534a43" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <g id="pocketCards"></g>
+      <g class="front">
+        <use href="#pocket" fill="url(#leather)" stroke="url(#edge)" stroke-width="2.2"/>
+        <g clip-path="url(#pocket-mask)">
+          <rect x="37" y="42" width="315" height="225" filter="url(#grain)" opacity=".23" style="mix-blend-mode:soft-light"/>
+          <path d="M4

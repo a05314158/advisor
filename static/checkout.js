@@ -3,9 +3,8 @@ const checkout = (() => {
   'use strict';
   const el = id => document.getElementById(id);
   const field = el('buyAmount'), status = el('buyStatus'), results = el('buyResults');
-  let scope = 'mine', selected = '', expanded = true, more = false, epoch = 0, timer, recording = false;
+  let selected = '', expanded = true, more = false, epoch = 0, timer, recording = false;
   let owner;
-  const publicIds = new Set(['supermarkets','cafe','fuel','pharmacy','transport','clothing','electronics','marketplace','entertainment','utilities','travel','all']);
   const paths = {
     supermarkets:'M2 3h3l3 13h12l2-10H6 M9 19a1.5 1.5 0 1 0 .1 0 M18 19a1.5 1.5 0 1 0 .1 0',
     cafe:'M3 8h14v5a6 6 0 0 1-6 6H9a6 6 0 0 1-6-6z M17 9h2a3 3 0 0 1 0 6h-2 M3 22h16 M7 3v2 M12 2v3',
@@ -38,7 +37,7 @@ const checkout = (() => {
   const label=id=>categories[id]||id;
   function paint(){
     const grid=el('categoryGrid'), change=el('changeCategory');
-    const ids=Object.keys(categories).filter(id=>scope==='mine'||publicIds.has(id));
+    const ids=Object.keys(categories);
     if(selected&&!ids.includes(selected)){selected='';expanded=true;}
     grid.replaceChildren(); grid.hidden=!expanded;change.hidden=!selected;
     change.replaceChildren(icon(selected),node('strong',label(selected)),node('span',expanded?'Свернуть':'Изменить'));
@@ -49,24 +48,29 @@ const checkout = (() => {
       b.setAttribute('aria-pressed',String(id===selected)); b.append(icon(id),node('span',name)); b.hidden=i>=6&&!more&&id!==selected; grid.append(b);
     });
     el('moreCategories').hidden=!expanded||ids.length<=6;el('moreCategories').textContent=more?'Скрыть остальные категории':'Все категории';el('moreCategories').setAttribute('aria-expanded',String(more));
-    document.querySelectorAll('[data-scope]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scope===scope)));
-    el('scopeNote').textContent=scope==='all'?'Учебные предложения. Это сравнение, а не оформление карты.':'Сравниваем только карты из вашего кошелька.';
   }
-  function setScope(mode){scope=mode;paint();queue();}
   function term(host,name,value){host.append(node('dt',name),node('dd',value));}
   function row(r,index,all){
     const article=node('article',null,index?'advice-row':'advice-winner');
     const title=node('h4',r.bankName===r.cardName?r.cardName:`${r.bankName} · ${r.cardName}`);
-    const val=node('strong',amountText(r.cashbackKopecks),'advice-value');article.append(title,val);
     const ruleName=r.label||label(r.categoryId);const rate=formatRate(r.rateBps)+'%';
-    article.append(node('p',label(selected),'advice-cat'),node('p',`${r.categoryId==='all'&&selected!=='all'?'Запасное правило «На все покупки»':`Правило «${ruleName}»`}: ${rate}.${r.limitApplied?' Возврат ограничен лимитом '+amountText(r.limitKopecks)+'.':''}`));
+    const catHuman=label(selected);
+    article.append(title);
+    if(index===0){
+      const lead=node('p',null,'advice-lead');
+      lead.append(node('strong',amountText(r.cashbackKopecks),'advice-value'), document.createTextNode(` · ${rate} на ${catHuman.toLowerCase()}`));
+      article.append(lead);
+    }else{
+      const line=node('p',`${title.textContent} · ${amountText(r.cashbackKopecks)}`,'advice-line');
+      article.append(line);
+    }
     if(all.some((x,i)=>i!==index&&x.cashbackKopecks===r.cashbackKopecks))article.append(node('p','Ещё одна карта даёт такой же возврат.','buy-note'));
     const details=node('details'), dl=node('dl');details.append(node('summary','Условия'),dl);
     term(dl,'Ставка',rate);term(dl,'Категория правила',ruleName);term(dl,'Минимальная покупка',r.minAmountKopecks==null?'Не указана':amountText(r.minAmountKopecks));
     term(dl,'Лимит правила',r.limitKopecks===null?'Без ограничения':r.limitKopecks===undefined?'Неизвестен':`${amountText(r.limitKopecks)} · ${r.limitApplied?'применён':'не применён'}`);
     term(dl,'Период',`${r.validFrom?'С '+day(r.validFrom):'Начало неизвестно'}${r.validUntilExclusive?' до '+day(r.validUntilExclusive)+' (не включая)':' · конец не указан'}`);
     term(dl,'Актуальность',r.updatedOn?day(r.updatedOn):'Дата не указана');const sources={catalog:'Учебный каталог',manual:'Условия из вашего кошелька',confirmed:'Подключённые условия'};term(dl,'Источник',sources[r.source]||r.source||(!String(r.cardId||'').startsWith('manual-')?'Учебный каталог':'Условия из вашего кошелька'));article.append(details);
-    if(index===0&&scope==='mine'&&r.bankAccess?.webUrl){const a=node('a','Открыть официальный сайт банка');a.href=r.bankAccess.webUrl;a.rel='noopener noreferrer';a.target='_blank';article.append(a);}
+    if(index===0&&r.bankAccess?.webUrl){const a=node('a','Открыть официальный сайт банка');a.href=r.bankAccess.webUrl;a.rel='noopener noreferrer';a.target='_blank';article.append(a);}
     return article;
   }
   function recordForm(matches,value){
@@ -82,20 +86,18 @@ const checkout = (() => {
     };return form;
   }
   async function calculate(ticket,value){
-    const req=mode=>api('/api/recommendations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categoryId:selected,amountKopecks:value,scope:mode})});
-    try{const data=await req(scope);if(ticket!==epoch)return;const all=data.allMatches;
-      if(!all.length){status.textContent=scope==='all'?'В учебном каталоге подходящих условий нет.':manual.length+saved.length?'По вашим картам подходящих условий нет.':'Кошелёк пуст. Добавьте карту или сравните учебные предложения.';}
-      else{status.textContent=all[0].cashbackKopecks===0?`По ${scope==='mine'?'вашим картам':'каталогу'} в категории «${label(selected)}» — 0 ₽.`:`Ожидаемый возврат · карт в сравнении: ${all.length}`;
+    try{const data=await api('/api/recommendations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categoryId:selected,amountKopecks:value,scope:'mine'})});if(ticket!==epoch)return;const all=data.allMatches;
+      if(!all.length){status.textContent=manual.length+saved.length?'По вашим картам подходящих условий нет.':'Кошелёк пуст. Добавьте карту.';}
+      else{status.textContent=all[0].cashbackKopecks===0?`По вашим картам в категории «${label(selected)}» — 0 ₽.`:`Ожидаемый возврат · карт в сравнении: ${all.length}`;
         data.top3.forEach((r,i)=>results.append(row(r,i,all)));if(all.length>data.top3.length){const more=node('details',null,'more-results');const summary=node('summary',`Все подходящие карты (${all.length})`);more.append(summary);summary.parentElement.addEventListener('toggle',()=>{if(!more.open||more.dataset.filled)return;more.dataset.filled='1';all.slice(data.top3.length).forEach((r,i)=>more.append(row(r,i+data.top3.length,all)));});results.append(more);}
-        if(scope==='mine')results.append(recordForm(all,value));}
-      if(scope==='mine'&&(!all.length||!all[0].cashbackKopecks)&&publicIds.has(selected)){let alt=data.catalogSuggestion;if(!alt){try{alt=(await req('all')).top3[0]}catch{return;}}if(ticket===epoch&&alt?.cashbackKopecks>0)results.append(button('Посмотреть в каталоге',()=>setScope('all')));}
+        results.append(recordForm(all,value));}
     }catch{if(ticket!==epoch)return;results.replaceChildren(button('Повторить расчёт',queue));status.textContent='Не удалось рассчитать кэшбэк. Проверьте соединение и повторите.';}
   }
   function queue(){const ticket=++epoch;clearTimeout(timer);results.replaceChildren();const {value,msg}=parse(field.value);field.setAttribute('aria-invalid',String(!!field.value&&!value));el('clearAmount').hidden=!field.value;
     if(!selected||!value){status.textContent=!selected?'Выберите категорию покупки.':msg;return;}status.textContent='Считаем…';timer=setTimeout(()=>calculate(ticket,value),160);}
   el('changeCategory').onclick=()=>{expanded=!expanded;paint();if(expanded)el('categoryGrid').querySelector('[aria-pressed=true]')?.focus();};
   el('moreCategories').onclick=()=>{more=!more;paint();if(more)el('categoryGrid').children[6]?.focus();};
-  field.oninput=queue;el('clearAmount').onclick=()=>{field.value='';field.focus();queue();};document.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>setScope(b.dataset.scope));
-  function refresh(){if(owner!==deviceLogin){owner=deviceLogin;scope='mine';selected='';field.value='';expanded=true;more=false;}paint();if(!el('buyPanel').hidden)queue();}
+  field.oninput=queue;el('clearAmount').onclick=()=>{field.value='';field.focus();queue();};
+  function refresh(){if(owner!==deviceLogin){owner=deviceLogin;selected='';field.value='';expanded=true;more=false;}paint();if(!el('buyPanel').hidden)queue();}
   return {refresh,open(){refresh();el('buyTitle').focus({preventScroll:true});}};
 })();

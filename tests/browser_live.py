@@ -48,9 +48,7 @@ def run(base, chromium=None):
             expect(add).to_be_hidden()
             expect(page.locator('#carouselDetails')).to_contain_text('ВТБ')
             # After add the menu opens with focus on «Добавить условия»
-            if page.locator('#cardMenu').is_hidden():
-                button(cards, 'Действия с картой').click()
-            button(cards, 'Добавить условия кэшбэка').click()
+            cards.locator('#addCashbackBtn').click()
             review = page.locator('#catalogDialog')
             button(review, 'Да — добавить подключённые').click()
             expect(review.locator('#cashbackShot')).to_be_visible()
@@ -61,7 +59,7 @@ def run(base, chromium=None):
             error = page.locator('#shotError').inner_text().strip()
             if error:
                 raise AssertionError(error)
-            rows = page.locator('#reviewRows fieldset')
+            rows = page.locator('#reviewRows .review-row, #reviewRows fieldset')
             expect(rows.first).to_be_visible()
             labels = rows.locator('[data-key=label]').evaluate_all('(els) => els.map(el => el.value)')
             print('Черновик:', labels)
@@ -76,7 +74,7 @@ def run(base, chromium=None):
             for rate in rows.locator('[data-key=rateBps]').all():
                 if not rate.input_value().strip():
                     rate.fill('5')
-            button(review, 'Сохранить категории').click()
+            button(review, re.compile('Сохранить')).click()
             expect(review).to_be_hidden(timeout=20000)
             page.reload()
             expect(cards).to_be_visible()

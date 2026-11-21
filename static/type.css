@@ -1,0 +1,104 @@
+/* Atlas rhythm + T-Bank-like readability on Onest Variable */
+
+:root {
+  --text-body: 16px;
+  --text-body-sm: 15px;
+  --text-quiet: 14px;
+  --text-caption: 13px;
+  --text-btn: 16px;
+  --text-screen-title: clamp(26px, 6.8vw, 30px);
+  --text-hero: clamp(28px, 7.5vw, 34px);
+  --text-money-lg: clamp(32px, 8vw, 42px);
+  --leading-body: 1.45;
+  --leading-ui: 1.35;
+  --leading-tight: 1.12;
+  --weight-body: 400;
+  --weight-ui: 600;
+  --weight-title: 700;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  font-weight: var(--weight-body);
+}
+
+p, .cb-note, .journal-meta, #scopeNote, #buyStatus, .home-row-copy span,
+.stat-primary span, .stat-secondary span, .account-login {
+  font-size: var(--text-quiet);
+  line-height: var(--leading-ui);
+  font-weight: var(--weight-body);
+}
+
+label, .shot-form label, .history-month-label, .review-month-label {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-ui);
+  line-height: var(--leading-ui);
+}
+
+button, .btn-primary, #openBuy, .account-primary-btn {
+  font-size: var(--text-btn);
+  font-weight: var(--weight-ui);
+  line-height: var(--leading-ui);
+}
+
+#cards-title, #historyTitle, #accountTitle, #buyTitle {
+  font-size: var(--text-screen-title);
+  font-weight: var(--weight-title);
+  line-height: var(--leading-tight);
+  letter-spacing: -.04em;
+}
+
+.ask-block h1, #homeTitle {
+  font-size: var(--text-hero);
+  font-weight: var(--weight-title);
+  line-height: var(--leading-tight);
+  letter-spacing: -.045em;
+}
+
+.auth-card h1, #authTitle {
+  font-size: clamp(28px, 8vw, 36px);
+  font-weight: var(--weight-title);
+  line-height: var(--leading-tight);
+  letter-spacing: -.05em;
+}
+
+.stat-primary strong, .journal-total strong {
+  font-size: var(--text-money-lg);
+  font-weight: var(--weight-title);
+  line-height: var(--leading-tight);
+  letter-spacing: -.04em;
+}
+
+#buyPanel .buy-amount, .buy-amount {
+  font-size: clamp(26px, 7vw, 32px);
+  font-weight: var(--weight-title);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+#categoryGrid .tile span,
+#changeCategory span {
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-ui);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: manual;
+}
+
+.money, .tabular, .journal-money, .advice-value, .carousel-position,
+.stat-primary strong, .profile-legend .val {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrow mobile: long category/bank labels */
+@media (max-width: 359px) {
+  #categoryGrid .tile.tile-wide span { font-size: 14px; }
+}

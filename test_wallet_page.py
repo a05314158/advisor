@@ -24,6 +24,7 @@ class WalletPage(unittest.TestCase):
         self.assertLess(PAGE.index('Какой картой выгоднее заплатить?'), PAGE.index('id="homePreview"'))
         self.assertLess(PAGE.index('id="openBuy"'), PAGE.index('id="openCards"'))
         self.assertIn('id="openPlan"', PAGE)
+        self.assertIn('id="homeOffersStub"', PAGE)
         self.assertIn('id="accountPanel"', PAGE)
 
     def test_hero_tags_balance(self):
@@ -34,7 +35,8 @@ class WalletPage(unittest.TestCase):
     def test_empty_line_is_inside_the_leather_wallet(self):
         self.assertIn('id="homeSummary"', PAGE)
         self.assertIn('id="emptyAdd"', PAGE)
-        self.assertIn('Пока нет карт', PAGE)
+        self.assertIn('id="homeSummaryHint"', PAGE)
+        self.assertIn('Добавьте карту', PAGE)
 
     def test_settings_controls_real_session_and_theme(self):
         self.assertIn('id="logout"', PAGE)
@@ -64,13 +66,14 @@ class WalletPage(unittest.TestCase):
 
     def test_home_is_purchase_and_cards(self):
         self.assertIn('id="settingsTheme"', PAGE)
-        self.assertIn('aria-label="Аккаунт"', PAGE)
+        self.assertIn('aria-label="Профиль"', PAGE)
         self.assertNotIn('>Тёмная<', PAGE)
         self.assertIn('id="openBuy"', PAGE)
         self.assertIn('id="openCards"', PAGE)
         self.assertIn('id="buyAmount"', PAGE)
         self.assertIn('id="showStatsBtn"', PAGE)
         self.assertIn('id="openPlan"', PAGE)
+        self.assertIn('id="homeOffersStub"', PAGE)
         self.assertIn('src="/wallet-cashback.js"', PAGE)
         self.assertIn("defineProperty(window,name", PAGE)
 
@@ -85,7 +88,7 @@ class WalletPage(unittest.TestCase):
         self.assertIn('ArrowRight', PAGE)
         self.assertIn('cubicBezier', PAGE)
         self.assertIn('prefers-reduced-motion: reduce', PAGE)
-        self.assertIn('carouselPoses=[[0,0,0,1,0,0],[1,.78,.18,.90,10,0]', PAGE)
+        self.assertIn('carouselPoses=[[0,0,0,1,0,0],[1,.94,.06,.93,10,2]', PAGE)
         self.assertIn('id="demoBar"', PAGE)
         self.assertIn('demo=cards', PAGE)
         self.assertIn('из ${cards.length}', PAGE)

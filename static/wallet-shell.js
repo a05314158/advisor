@@ -14,6 +14,23 @@ const DEMO_DECK = [
 ];
 function walletCount(n){return n===1?'1 карта':n>1&&n<5?`${n} карты`:`${n} карт`;}
 function purchaseCount(n){const mod10=n%10, mod100=n%100; const word=mod10===1&&mod100!==11?'покупка':mod10>=2&&mod10<=4&&(mod100<12||mod100>14)?'покупки':'покупок'; return `${n} ${word}`;}
+function profileEmoji(login){
+  const icons=['🙂','🌿','⭐️','💳','🦊','🐻','🎯','🌙'];
+  let h=0; for(let i=0;i<login.length;i++) h=(h*31+login.charCodeAt(i))>>>0;
+  return icons[h%icons.length];
+}
+function renderAccountIdentity(){
+  const login=(deviceLogin||'').trim();
+  if($('accountAvatar')) $('accountAvatar').textContent=login?profileEmoji(login):'👤';
+  if($('accountDisplayName')) $('accountDisplayName').textContent='Мой кошелёк';
+  if($('settingsUser')) $('settingsUser').textContent=login?`@${login}`:'Гость';
+}
+function syncThemeControls(){
+  const theme=document.documentElement.dataset.theme||'light';
+  if($('settingsTheme')) $('settingsTheme').value=theme;
+  if($('themeLight')) $('themeLight').setAttribute('aria-pressed', String(theme==='light'));
+  if($('themeDark')) $('themeDark').setAttribute('aria-pressed', String(theme==='dark'));
+}
 function walletBank(card){
   const key=(card?.bankId||card?.name||card?.cardName||'').toString().toLowerCase().replace(/[^a-zа-я0-9]/gi,'');
   return banks.find(bank=>bank.id===card?.bankId || bank.name===(card?.name||card?.cardName) || bank.name.toLowerCase().replace(/[^a-zа-я0-9]/gi,'')===key) || null;
@@ -27,20 +44,39 @@ function walletCardCaption(card){
 function ruleLine(rule){return `${rule.label||categories[rule.categoryId]||rule.categoryId} · ${formatRate(rule.rateBps)}%`;}
 function renderWalletCardDetails(card){
   const host=$('carouselSummary'); if(!host) return; host.replaceChildren();
-  host.append(Object.assign(document.createElement('strong'),{textContent:card.cardName||card.name}));
-  if(card.demo) host.append(Object.assign(document.createElement('small'),{textContent:'Ставки демонстрационные'}));
-  const rules=card.rules||[];
-  const text=document.createElement('small');
-  text.textContent=rules.length?rules.slice(0,3).map(ruleLine).join(', '):(document.documentElement.dataset.demo==='cards'?'': 'Добавить условия');
-  host.append(text);
-  if(rules.length>3){
-    const more=document.createElement('button'); more.type='button'; more.className='text-action'; more.textContent='Все категории'; more.setAttribute('aria-expanded','false');
-    const rest=document.createElement('small'); rest.hidden=true; rest.textContent=rules.map(ruleLine).join(', ');
-    more.onclick=()=>{rest.hidden=!rest.hidden; more.setAttribute('aria-expanded', String(!rest.hidden)); if(!rest.hidden) text.hidden=true; else text.hidden=false;};
-    host.append(more, rest);
+  const title=document.createElement('p');
+  title.className='carousel-bank-title';
+  title.textContent=card.cardName||card.name;
+  host.append(title);
+  if(card.demo){
+    host.append(Object.assign(document.createElement('p'),{className:'carousel-demo-note',textContent:'Ставки демонстрационные'}));
   }
-  if($('cardMenu')){$('cardMenu').hidden=true; $('cardMenuBtn').setAttribute('aria-expanded','false');}
-  $('makeUsualBtn').disabled=!card; $('deleteActiveBtn').disabled=!card;
+  const rules=card.rules||[];
+  const list=$('carouselCategories');
+  if(list){
+    list.replaceChildren();
+    list.hidden=!rules.length;
+    rules.forEach(rule=>{
+      const li=document.createElement('li');
+      const name=rule.label||categories[rule.categoryId]||rule.categoryId;
+      li.append(Object.assign(document.createElement('span'),{className:'carousel-cat-name',textContent:name}));
+      li.append(Object.assign(document.createElement('span'),{className:'carousel-cat-rate',textContent:`${formatRate(rule.rateBps)}%`}));
+      list.append(li);
+    });
+  }
+  const hint=$('carouselEmptyHint');
+  if(hint) hint.hidden=!!rules.length || document.documentElement.dataset.demo==='cards';
+  const cashback=$('addCashbackBtn');
+  if(cashback){
+    cashback.hidden=false;
+    cashback.textContent=rules.length?'Изменить условия кэшбэка':'Добавить условия кэшбэка';
+    cashback.disabled=!card;
+  }
+  if($('cardActions')) $('cardActions').hidden=!card;
+  if($('cardMenu')){$('cardMenu').hidden=true;}
+  if($('cardMenuBtn')) $('cardMenuBtn').setAttribute('aria-expanded','false');
+  if($('makeUsualBtn')) $('makeUsualBtn').disabled=!card;
+  if($('deleteActiveBtn')) $('deleteActiveBtn').disabled=!card;
 }
 function renderWalletCashback(){/* overview stays in the inline toggle */}
 function activeCard(){
@@ -52,6 +88,10 @@ function applyWalletRoute(route){
   $('hero').hidden=route!=='home'; $('content').hidden=route==='home';
   $('buyPanel').hidden=true; $('cardsPanel').hidden=route!=='cards'; $('historyPanel').hidden=route!=='history';
   if($('accountPanel')) $('accountPanel').hidden=route!=='account';
+  if(route==='home' || route==='account' || route==='history' || route==='buy'){
+    const catalog=$('catalogDialog'); if(catalog && !catalog.hidden) catalog.hidden=true;
+    const plan=$('planDialog'); if(plan && !plan.hidden) plan.hidden=true;
+  }
   markRoute(route);
   if(route==='cards' && $('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot(); applyCarouselTransforms();}
   if(route==='history') renderHistory();
@@ -69,7 +109,10 @@ function walletRoute(route, replace){
 }
 function walletBack(){
   if(typeof window.walletCashbackBack==='function' && window.walletCashbackBack()) return;
-  if(history.state && history.state.advisor) history.back();
+  const hash=(location.hash||'#home').replace(/^#/,'');
+  const route=shellRoutes.includes(hash)?hash:'home';
+  if(route==='home') return;
+  if(window.history.length>1) history.back();
   else walletRoute('home', true);
 }
 function markRoute(route){document.querySelectorAll('[data-route]').forEach(button=>{if(button.dataset.route===route)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});}
@@ -131,13 +174,13 @@ function fillAddChoices(){
   items.forEach(item=>select.append(new Option(item.label,item.value)));
   if(previous && [...select.options].some(option=>option.value===previous)) select.value=previous;
   else if(items.length===1) select.value=items[0].value;
-  const box=$('bankSuggestions'); box.replaceChildren(); bankSuggest=-1;
+  const box=$('bankSuggestions'); box.replaceChildren(); box.className='suggest bank-list'; bankSuggest=-1;
   if(catalogMode){box.hidden=true; $('bankSearch').setAttribute('aria-expanded','false');}
   else {
     box.hidden=false; $('bankSearch').setAttribute('aria-expanded','true');
     const list=query?items:banks.map(bank=>({value:bank.id,label:bank.name}));
     list.forEach((item,index)=>{
-      const option=document.createElement('button'); option.type='button'; option.setAttribute('role','option');
+      const option=document.createElement('button'); option.type='button'; option.className='bank-row'; option.setAttribute('role','option');
       option.textContent=item.label; option.onmousedown=event=>event.preventDefault();
       option.onclick=()=>{
         $('newBank').value=item.value; $('bankSearch').value=item.label;
@@ -156,6 +199,11 @@ function monthTitle(month){
   const name=new Intl.DateTimeFormat('ru-RU',{month:'long', year:'numeric', timeZone:'UTC'}).format(new Date(month+'-01T12:00:00Z')).replace(/\s*г\.?$/,'');
   return name.charAt(0).toUpperCase()+name.slice(1);
 }
+function syncHistoryMonthText(){
+  const input=$('historyMonth'), text=$('historyMonthText');
+  if(!input||!text) return;
+  text.textContent=input.value?monthTitle(input.value):'Текущий месяц';
+}
 function dayTitle(iso){
   if(!iso) return 'Без даты';
   return new Intl.DateTimeFormat('ru-RU',{day:'numeric', month:'long', timeZone:'UTC'}).format(new Date(iso.slice(0,10)+'T12:00:00Z'));
@@ -168,14 +216,15 @@ async function renderHistory(){
     if($('historyMonth') && data.month) $('historyMonth').value=data.month;
     historyMonth=data.month;
     const summary=document.createElement('section'); summary.className='journal-summary';
-    const month=document.createElement('p'); month.className='journal-month'; month.textContent=monthTitle(data.month);
+    syncHistoryMonthText();
     const total=document.createElement('p'); total.className='journal-total';
     const strong=document.createElement('strong'); strong.className='money'; strong.textContent=money(data.calculatedKopecks);
     const caption=document.createElement('span'); caption.textContent='Расчётный кэшбэк';
     total.append(strong, caption);
-    const meta=document.createElement('p'); meta.className='journal-meta'; meta.textContent=`${purchaseCount(data.count)} · ${data.note||'Это расчёт по записанным покупкам, не начисление банка.'}`;
-    summary.append(month, total, meta);
-    const ask=document.createElement('button'); ask.type='button'; ask.className='text-action'; ask.textContent='Разобрать месяц';
+    const noteShort=(data.note||'Расчёт по записанным покупкам.').split('.').filter(Boolean)[0]+'.';
+    const meta=document.createElement('p'); meta.className='journal-meta'; meta.textContent=`${purchaseCount(data.count)} · ${noteShort}`;
+    summary.append(total, meta);
+    const ask=document.createElement('button'); ask.type='button'; ask.className='secondary-action'; ask.textContent='Разобрать месяц';
     ask.onclick=async()=>{ask.disabled=true; ask.textContent='Разбираем…'; try{const reply=await api('/api/me/stats/comment',{method:'POST'},45000); const comment=document.createElement('p'); comment.textContent=reply.comment; summary.append(comment);}catch(error){toast(error.message);}finally{ask.disabled=false; ask.textContent='Разобрать месяц';}};
     summary.append(ask); host.append(summary);
     if(!data.purchases.length){host.classList.add('is-empty'); const empty=document.createElement('p'); empty.textContent='Покупок в этом месяце нет. Запишите покупку после совета.'; host.append(empty); return;}
@@ -215,16 +264,36 @@ async function renderHistory(){
 }
 async function renderAccount(){
   const host=$('accountStats'); if(!host) return;
-  const letter=(deviceLogin||'').trim().charAt(0).toUpperCase();
-  $('accountAvatar').textContent=letter||'•';
-  $('settingsUser').textContent=deviceLogin||'Гость';
+  renderAccountIdentity();
   host.className=''; host.setAttribute('aria-busy','true'); host.textContent='Загружаем статистику…';
   try{
     const data=await api('/api/me/stats'); host.setAttribute('aria-busy','false'); host.replaceChildren();
     const primary=document.createElement('p'); primary.className='stat-primary';
     const label=document.createElement('span'); label.textContent='Расчётный кэшбэк';
     const value=document.createElement('strong'); value.className='money'; value.textContent=money(data.calculatedKopecks);
-    primary.append(label, value); host.append(primary);
+    primary.append(label, value);     host.append(primary);
+    if(Array.isArray(data.cards)&&data.cards.length){
+      const palette=['#ffdd2d','#285a3a','#5d8fc9','#a22624','#8d7ecb','#79ac66','#cbb8ed'];
+      const total=data.cards.reduce((sum,c)=>sum+c.cashbackKopecks,0)||1;
+      let cursor=0; const stops=[];
+      data.cards.forEach((card,i)=>{
+        const share=(card.cashbackKopecks/total)*100; const color=palette[i%palette.length];
+        stops.push(`${color} ${cursor}% ${cursor+share}%`); cursor+=share;
+      });
+      const donut=document.createElement('div'); donut.className='profile-donut';
+      const ring=document.createElement('div'); ring.className='profile-donut-ring';
+      ring.style.background=`conic-gradient(${stops.join(',')})`;
+      ring.setAttribute('role','img'); ring.setAttribute('aria-label','Доля кэшбэка по картам за месяц');
+      const legend=document.createElement('ul'); legend.className='profile-legend';
+      data.cards.forEach((card,i)=>{
+        const li=document.createElement('li');
+        const sw=document.createElement('span'); sw.className='swatch'; sw.style.background=palette[i%palette.length];
+        const name=document.createElement('span'); name.className='name'; name.textContent=card.name||card.cardId;
+        const val=document.createElement('span'); val.className='val money'; val.textContent=money(card.cashbackKopecks);
+        li.append(sw,name,val); legend.append(li);
+      });
+      donut.append(ring,legend); host.append(donut);
+    }
     const secondary=document.createElement('div'); secondary.className='stat-secondary';
     const count=document.createElement('p'); const countLabel=document.createElement('span'); countLabel.textContent='Покупок записано';
     const countValue=document.createElement('strong'); countValue.textContent=String(data.count); count.append(countLabel, countValue); secondary.append(count);
@@ -239,9 +308,21 @@ async function renderAccount(){
   }
 }
 document.querySelectorAll('[data-route]').forEach(button=>button.addEventListener('click',()=>walletRoute(button.dataset.route)));
-$('openBuy').addEventListener('click',()=>walletRoute('buy'));
+$('openBuy').addEventListener('click',()=>{
+  if(!carouselPos.all.length){ walletRoute('cards', true); openAddCard($('openCatalog')); return; }
+  walletRoute('buy');
+});
+if($('authGuest')) $('authGuest').addEventListener('click',async()=>{
+  const button=$('authGuest');
+  button.disabled=true; $('authError').textContent='';
+  try{
+    const user=await api('/api/auth/guest',{method:'POST'});
+    deviceLogin=user.login; localStorage.setItem('advisor-login',user.login);
+    sessionStorage.setItem('advisor-auth-home','1'); await checkAuth();
+  }catch(error){$('authError').textContent=error.message||'Не удалось войти как гость'; button.disabled=false;}
+});
 $('openCards').addEventListener('click',()=>walletRoute('cards'));
-$('emptyAdd').addEventListener('click',event=>openAddCard(event.currentTarget));
+$('emptyAdd').addEventListener('click',()=>{walletRoute('cards',true); openAddCard($('openCatalog'));});
 $('openCatalog').addEventListener('click',event=>openAddCard(event.currentTarget));
 $('buyBack').addEventListener('click',()=>walletBack());
 $('cardsBack').addEventListener('click',()=>walletBack());
@@ -249,14 +330,24 @@ $('historyBack').addEventListener('click',()=>walletBack());
 $('accountBack').addEventListener('click',()=>walletBack());
 $('showStatsBtn').addEventListener('click',()=>walletRoute('history'));
 $('retryWallet').addEventListener('click',()=>load());
-if($('historyMonth')) $('historyMonth').addEventListener('change',()=>{historyMonth=$('historyMonth').value||null; if(!$('historyPanel').hidden) renderHistory();});
+if($('historyMonth')){$('historyMonth').addEventListener('change',()=>{historyMonth=$('historyMonth').value||null; syncHistoryMonthText(); if(!$('historyPanel').hidden) renderHistory();}); syncHistoryMonthText();}
 window.addEventListener('popstate',()=>{
   if($('appScreen').hidden) return;
   if(typeof window.walletCashbackBack==='function' && !$('catalogDialog')?.hidden){ if(window.walletCashbackBack()) return; }
   for(const id of ['addDialog','deleteDialog','planDialog']) {const node=$(id); if(node) node.hidden=true;}
   const route=(location.hash||'#home').slice(1); applyWalletRoute(shellRoutes.includes(route)?route:'home');
 });
-$('passwordToggle').addEventListener('click',()=>{const input=$('authPassword'), shown=input.type==='text'; input.type=shown?'password':'text'; $('passwordToggle').textContent=shown?'Показать':'Скрыть'; $('passwordToggle').setAttribute('aria-pressed',String(!shown));});
+$('passwordToggle').addEventListener('click',()=>{
+  const input=$('authPassword'), btn=$('passwordToggle');
+  const next=input.type==='password'?'text':'password';
+  input.type=next;
+  const shown=next==='text';
+  btn.setAttribute('aria-pressed', String(shown));
+  btn.setAttribute('aria-label', shown?'Скрыть пароль':'Показать пароль');
+  const eye=btn.querySelector('.icon-eye'), off=btn.querySelector('.icon-eye-off');
+  if(eye) eye.hidden=shown;
+  if(off) off.hidden=!shown;
+});
 $('addSource').addEventListener('change',fillAddChoices);
 if($('openCatalogSource')) $('openCatalogSource').addEventListener('click',showCatalogForm);
 $('bankSearch').addEventListener('input',()=>{bankSuggest=-1; fillAddChoices();});
@@ -276,31 +367,29 @@ async function submitNewCard(event){
     if(catalogMode){await api('/api/me/cards/'+encodeURIComponent(id),{method:'PUT'}); walletPreferredCard=id;}
     else{const bank=banks.find(item=>item.id===id); const created=await api('/api/me/manual-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:bank.name,bankId:bank.id,rules:[]})}); walletPreferredCard=created.cardId;}
     $('addDialog').hidden=true; toast('Карта добавлена'); await load(); walletRoute('cards',true);
-    $('cardMenu').hidden=false; $('cardMenuBtn').setAttribute('aria-expanded','true'); $('addCashbackBtn').focus();
+    $('addCashbackBtn').focus();
   }catch(error){$('addStatus').textContent=error.message; $('retryAdd').hidden=false;}
   finally{button.textContent='Добавить карту'; button.disabled=$('newBank').options.length===0;}
-}
-async function saveUsualCard(){
-  try{await api('/api/me/usual-card',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cardId:$('usualCard').value})}); toast($('usualCard').value?'Обычная карта сохранена':'Обычная карта снята');}
-  catch(error){toast(error.message);}
 }
 $('closeAdd').addEventListener('click',()=>closeDialog($('addDialog')));
 $('addRouteBank').addEventListener('click',showBankForm);
 $('addRouteShot').addEventListener('click',()=>{closeDialog($('addDialog')); $('addCashbackBtn').click();});
-$('cardMenuBtn').addEventListener('click',()=>{const open=$('cardMenu').hidden; $('cardMenu').hidden=!open; $('cardMenuBtn').setAttribute('aria-expanded', String(open)); if(open) $('addCashbackBtn').focus();});
+if($('cardMenuBtn') && !$('cardMenuBtn').hidden) $('cardMenuBtn').addEventListener('click',()=>{const open=$('cardMenu').hidden; $('cardMenu').hidden=!open; $('cardMenuBtn').setAttribute('aria-expanded', String(open)); if(open) $('addCashbackBtn').focus();});
 $('makeUsualBtn').addEventListener('click',async()=>{
   const card=activeCard(); if(!card) return; $('makeUsualBtn').disabled=true;
   try{await api('/api/me/usual-card',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cardId:card.cardId})}); toast('Обычная карта сохранена');}
   catch(error){toast(error.message);} finally{$('makeUsualBtn').disabled=false;}
 });
 $('deleteActiveBtn').addEventListener('click',()=>{
-  const card=activeCard(); if(!card) return; deleteTarget=card; walletReturn=$('cardMenuBtn');
+  const card=activeCard(); if(!card) return; deleteTarget=card; walletReturn=$('addCashbackBtn');
   $('deleteTitle').textContent='Удалить карту?'; $('deleteDescription').textContent=`Карта «${card.cardName||card.name}» исчезнет из кошелька вместе с сохранёнными условиями. Покупки в истории останутся.`;
   $('deleteStatus').textContent=''; $('deleteDialog').hidden=false; $('cancelDelete').focus();
 });
 $('showCashbackBtn').addEventListener('click',()=>$('showCashbackBtn').setAttribute('aria-expanded',String(!$('cashbackView').hidden)));
-$('settingsTheme').addEventListener('change',()=>applyTheme($('settingsTheme').value));
+if($('themeLight')) $('themeLight').addEventListener('click',()=>{applyTheme('light'); syncThemeControls();});
+if($('themeDark')) $('themeDark').addEventListener('click',()=>{applyTheme('dark'); syncThemeControls();});
 $('logout').addEventListener('click',async()=>{
+  if(!window.confirm('Выйти из кошелька на этом устройстве?')) return;
   $('logout').disabled=true;
   try{await api('/api/auth/logout',{method:'POST'}); expireSession();}
   catch(error){$('settingsStatus').textContent=error.message;}
@@ -319,8 +408,9 @@ $('confirmDelete').addEventListener('click',async()=>{
 const originalOpenSettings=openSettings;
 openSettings=async function(){
   await originalOpenSettings();
-  $('settingsTheme').value=document.documentElement.dataset.theme||'light';
+  syncThemeControls();
   $('settingsStatus').textContent='';
+  renderAccountIdentity();
   await renderAccount();
 };
 function showSessionGate(message, retry){

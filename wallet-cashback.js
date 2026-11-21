@@ -6,6 +6,8 @@
   let draftEpoch = 0, planEpoch = 0, busy = false, dirty = false, planDirty = false;
   let mode, target, replay, image = '', origin, planOrigin, source, suggestedMonth;
   const node = (tag,text,cls) => { const el=document.createElement(tag); if(text!=null) el.textContent=text; if(cls) el.className=cls; return el; };
+  function setCatalogBusy(on){busy=!!on; const layer=$('catalogBusy'); if(layer) layer.hidden=!on; review.classList.toggle('is-busy',!!on);}
+  function reviewEditSummary(){const summary=node('summary',null,'review-edit-toggle'); summary.setAttribute('aria-label','Изменить'); summary.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 20h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; return summary;}
   const action = (label,fn) => {const el=node('button',label); el.type='button'; el.onclick=fn; return el;};
   const bankName = id => banks.find(b=>b.id===id)?.name || id;
   const monthAt = delta => {const now=new Date(); return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+delta,1)).toISOString().slice(0,7);};
@@ -28,7 +30,12 @@
   }
   function showStep(id,title,focus){
     for(const key of ['decisionStep','screenshotForm','reviewForm']) $(key).hidden=key!==id;
-    $('dialogTitle').textContent=title; $('shotError').textContent=''; review.querySelector('.dialog-card').scrollTop=0; $(focus).focus();
+  const compact=id==='reviewForm' && $('reviewForm').dataset.density==='compact';
+  review.classList.toggle('catalog-sheet', id==='screenshotForm' || compact);
+  review.classList.toggle('catalog-confirm', compact);
+    $('dialogTitle').textContent=title;
+    $('dialogTitle').classList.toggle('is-visual', id==='screenshotForm');
+    $('shotError').textContent=''; review.querySelector('.dialog-card').scrollTop=0; $(focus)?.focus?.();
   }
   function openDecision(trigger,month){
     origin=trigger; suggestedMonth=month; dirty=false; clearShot(); planner.hidden=true; review.hidden=false;
@@ -38,12 +45,21 @@
   }
   $('addCashbackBtn').addEventListener('click',e=>openDecision(e.currentTarget));
   $('bankId').onchange=()=>cardOptions();
+  function resolveCashbackCard(bankId){
+    const cards=carouselPos.all||[];
+    const active=cards.length?cards[mod(Math.round(carouselPos.value),cards.length)]:null;
+    const matches=manual.filter(c=>c.bankId===bankId || (!c.bankId && c.name===bankName(bankId)));
+    if(active?.cardId && matches.some(c=>c.cardId===active.cardId)) return active.cardId;
+    if(matches.length===1) return matches[0].cardId;
+    return matches[0]?.cardId || active?.cardId || '';
+  }
   function choose(value){
-    const bankId=$('bankId').value, cardId=$('cashbackCard').value;
-    if(!bankId || (!cardId && $('cashbackCard').options.length>1)){fail(new Error('Выберите банк и карту.'),$('shotError'));return;}
+    const bankId=$('bankId').value;
+    if(!bankId){fail(new Error('Выберите банк.'),$('shotError'));return;}
+    const cardId=resolveCashbackCard(bankId);
+    $('cashbackCard').value=cardId;
     target={bankId,cardId:cardId||undefined}; mode=value;
-    $('entryContext').textContent=bankName(bankId)+(mode==='offer'?' · предложения для плана':' · уже подключённые категории');
-    showStep('screenshotForm','Как добавить условия?','manualDraft');
+    showStep('screenshotForm','Условия кэшбэка','cashbackShot');
   }
   $('chooseOffer').onclick=()=>choose('offer'); $('chooseActive').onclick=()=>choose('active');
   let discardResolver = null;
@@ -60,7 +76,6 @@
   if($('discardStay')) $('discardStay').onclick=()=>{ $('discardDialog').hidden=true; const r=discardResolver; discardResolver=null; r?.(false); };
   if($('discardLeave')) $('discardLeave').onclick=()=>{ $('discardDialog').hidden=true; const r=discardResolver; discardResolver=null; r?.(true); };
   if($('discardDialog')) $('discardDialog').addEventListener('keydown',e=>{ if(e.key==='Escape'){ e.preventDefault(); $('discardStay').click(); }});
-  $('changeDecision').onclick=async()=>{if(!(await mayDiscard()))return; dirty=false; clearShot(); showStep('decisionStep','Условия кэшбэка','bankId');};
   $('cashbackShot').onchange=async()=>{
     clearFileState(); const token=draftEpoch,file=$('cashbackShot').files[0]; if(!file) return clearShot();
     dirty=true; $('shotPreview').textContent='Читаем снимок…';
@@ -70,9 +85,9 @@
   };
   function clearFileState(){++draftEpoch; image=''; $('confirmCard').disabled=true; $('confirmCard').textContent='Прочитать снимок'; $('shotError').textContent='';}
   $('screenshotForm').onsubmit=async e=>{e.preventDefault(); if(!image || $('confirmCard').disabled)return; const token=++draftEpoch;
-    $('confirmCard').disabled=true; $('confirmCard').textContent='Распознаём…'; $('shotError').textContent='';
+    $('confirmCard').disabled=true; setCatalogBusy(true); $('shotError').textContent='';
     try{const data=await post('cashback-screenshot',{...target,image},45000); if(token===draftEpoch)startReview(data.rules,data.month,null,'shot');}
-    catch(err){if(token===draftEpoch)fail(err,$('shotError'));} finally{if(token===draftEpoch){$('confirmCard').disabled=false; $('confirmCard').textContent='Прочитать снимок';}}
+    catch(err){if(token===draftEpoch)fail(err,$('shotError'));} finally{if(token===draftEpoch){$('confirmCard').disabled=false; setCatalogBusy(false);}}
   };
   $('manualDraft').onclick=async()=>{if(!(await mayDiscard()))return; startReview([{}],suggestedMonth || monthAt(mode==='offer'?1:0),null,'manual');};
   function labelled(parent,title,control,cls){const label=node('label',title,cls); label.append(control); parent.append(label); return control;}
@@ -86,11 +101,18 @@
     text.classList.toggle('is-empty', !value);
   }
   function updateReviewFooter(){
+    const compact=$('reviewForm').dataset.density==='compact';
     const boxes=[...$('reviewRows').children];
     let selected=0, needRate=false;
     boxes.forEach(box=>{
       const fields=Object.fromEntries([...box.querySelectorAll('[data-key]')].map(f=>[f.dataset.key,f]));
-      if(fields.include?.checked){ selected+=1; if(!(fields.rateBps?.value||'').trim()) needRate=true; }
+      if(!fields.include?.checked) return;
+      selected+=1;
+      const rateField=fields.rateBps;
+      if(!rateField) return;
+      const empty=!(rateField.value||'').trim();
+      if(rateField.classList.contains('needs-input') && empty) needRate=true;
+      else if(!compact && empty) needRate=true;
     });
     if($('reviewCount')) $('reviewCount').textContent=`Выбрано: ${selected}`;
     const needs=[];
@@ -99,6 +121,37 @@
     if(needRate) needs.push('укажите ставку');
     if($('reviewNeed')) $('reviewNeed').textContent=needs.length?'Нужно: '+needs.join(', '):'';
     $('saveReview').disabled=!!needs.length || busy;
+  }
+  function canCompactReview(rules){
+    return mode==='active' && rules.length>0;
+  }
+  function compactRow(rule={}){
+    const box=node('div',null,'review-row review-row-compact');
+    if(rule.uncertain) box.classList.add('is-uncertain');
+    const head=node('div',null,'review-row-head');
+    const title=node('div',null,'review-row-title');
+    const labelText=rule.label || categories[rule.categoryId] || 'Категория';
+    const rate=formatRateText(rule.rateBps);
+    const name=node('strong', rate?`${labelText} · ${rate}`:labelText);
+    if(rule.uncertain && rate) name.append(document.createTextNode(' · проверьте'));
+    title.append(name);
+    const include=node('input'); include.type='checkbox'; include.dataset.key='include'; include.checked=rule.rateBps!=null && rule.selected!==false;
+    const includeLabel=node('label','Подключена','review-check review-check-compact');
+    includeLabel.prepend(include);
+    const details=node('details',null,'review-details review-details-compact');
+    details.append(reviewEditSummary());
+    const grid=node('div',null,'cb-fields'); details.append(grid);
+    head.append(title, details, includeLabel); box.append(head);
+    const label=input(grid,'label','Название в банке',rule.label,'wide'); label.maxLength=80;
+    label.addEventListener('input',()=>{ const r=formatRateText(rateField.value===''?null:Number(String(rateField.value).replace(',','.'))*100); name.textContent=[label.value.trim()||'Категория', r].filter(Boolean).join(' · '); updateReviewFooter(); });
+    const category=input(grid,'categoryId','Категория для расчёта',rule.categoryId||'','wide'); category.setAttribute('list','cbCategoryIds'); category.maxLength=80;
+    const rateField=input(grid,'rateBps','Ставка, %',rule.rateBps==null?'':rule.rateBps/100); rateField.inputMode='decimal';
+    if(rule.rateBps==null){ rateField.required=true; rateField.placeholder='Укажите ставку'; rateField.classList.add('needs-input'); }
+    rateField.addEventListener('input',()=>{ const r=formatRateText(rateField.value===''?null:Number(String(rateField.value).replace(',','.'))*100); name.textContent=[label.value.trim()||'Категория', r||'ставка ?'].filter(Boolean).join(' · '); updateReviewFooter(); });
+    input(grid,'limitKopecks','Лимит кэшбэка, ₽',rule.limitKopecks==null?'':rule.limitKopecks/100);
+    input(grid,'minAmountKopecks','Минимальная сумма покупки, ₽',rule.minAmountKopecks==null?'':rule.minAmountKopecks/100);
+    include.addEventListener('change',updateReviewFooter);
+    $('reviewRows').append(box); return include;
   }
   function row(rule={}){
     const box=node('fieldset','','review-row');
@@ -143,17 +196,30 @@
     if(!Array.isArray(rules))throw new Error('Сервер не вернул список условий.');
     clearShot(); dirty=kind==='shot' || !month; source=kind; replay=null; $('reviewRows').replaceChildren();
     const active=mode==='active';
-    const cardLabel=$('cashbackCard').selectedOptions[0]?.textContent || 'Карта';
-    $('reviewContext').textContent=bankName(target.bankId)+' · '+cardLabel;
+    const cardLabel=manual.find(c=>c.cardId===$('cashbackCard').value)?.name || bankName(target.bankId);
+    const bank=bankName(target.bankId);
+    const same=bank===cardLabel || cardLabel.startsWith(bank+' ');
+    $('reviewContext').textContent=same?cardLabel:`${bank} · ${cardLabel}`;
     $('reviewMonth').value=month || ''; $('reviewMonth').disabled=kind==='plan'; syncMonthText();
     $('reviewSlots').value=slots??''; $('reviewSlots').max=128; $('reviewSlots').disabled=kind==='plan' && slots!=null;
     const slotsWrap=$('reviewSlotsLabel'); if(slotsWrap) slotsWrap.hidden=active;
     if($('reviewWarnings')){ $('reviewWarnings').hidden=true; $('reviewWarnings').textContent=''; }
-    $('reviewHint').textContent=active?'Отметьте категории, которые уже подключены в банке.':'Отметьте предложения для плана. Без числа мест сравнение этой карты недоступно.';
-    $('saveReview').textContent='Сохранить категории';
-    rules.forEach(row);
+    const compact=canCompactReview(rules);
+    $('reviewForm').dataset.density=compact?'compact':'full';
+    if($('addRule')) $('addRule').hidden=compact;
+    const hint=$('reviewHint');
+    if(hint){
+      hint.hidden=compact;
+      hint.textContent=active?'Отметьте категории, которые уже подключены в банке.':'Отметьте предложения для плана. Без числа мест сравнение этой карты недоступно.';
+    }
+    if($('reviewCount')) $('reviewCount').hidden=compact;
+  const monthWrap=$('reviewMonth')?.closest('.review-month');
+  if(monthWrap) monthWrap.classList.toggle('is-compact', compact);
+  if(compact && month){ $('reviewMonth').classList.add('is-collapsed'); } else { $('reviewMonth')?.classList.remove('is-collapsed'); }
+    $('saveReview').textContent=compact?'Сохранить':'Сохранить категории';
+    rules.forEach(rule=> compact?compactRow(rule):row(rule));
     updateReviewFooter();
-    showStep('reviewForm','Проверьте категории', month?'reviewContext':'reviewMonth');
+    showStep('reviewForm',compact?'Всё верно?':'Проверьте категории', month?'reviewMonthText':'reviewMonth');
   }
   $('reviewForm').oninput=()=>{dirty=true; updateReviewFooter();};
   $('reviewMonth').addEventListener('change',()=>{dirty=true; syncMonthText(); updateReviewFooter();});
@@ -168,7 +234,7 @@
     if(!rules.length)throw new Error('Отметьте хотя бы одну проверенную строку.');
     const body={...target,month:$('reviewMonth').value,mode,slots:$('reviewSlots').value===''?null:Number($('reviewSlots').value),rules};
     const signature=JSON.stringify(body); if(replay?.signature!==signature)replay={signature,key:newKey()};
-    busy=true; $('saveReview').disabled=true; $('saveReview').textContent='Сохраняем…'; $('reviewForm').inert=true; $('shotError').textContent='';
+    setCatalogBusy(true); $('saveReview').disabled=true; $('reviewForm').inert=true; $('shotError').textContent='';
     const response=await post('cashback-confirm',{...body,requestId:replay.key});
     if(mode==='offer')sessionOffers.set(offerKey(response.cardId,response.month),{rules:response.rules,slots:response.slots});
     walletPreferredCard=response.cardId || target.cardId || walletPreferredCard;
@@ -176,7 +242,7 @@
     await load(); invalidatePlan(); busy=false; dirty=false; closeReview(true);
     if(!returnToPlan && typeof walletRoute==='function') walletRoute('cards', true);
     toast(mode==='offer'?'Предложения сохранены для плана':'Категории сохранены');
-    }catch(err){fail(err,$('shotError')||$('reviewNeed'));}finally{busy=false; $('saveReview').disabled=false; $('saveReview').textContent='Сохранить категории'; $('reviewForm').inert=false; updateReviewFooter();}
+    }catch(err){fail(err,$('shotError')||$('reviewNeed'));}finally{setCatalogBusy(false); $('saveReview').disabled=false; $('saveReview').textContent=$('reviewForm').dataset.density==='compact'?'Сохранить':'Сохранить категории'; $('reviewForm').inert=false; updateReviewFooter();}
   };
   async function closeReview(force){
     if(busy) return false;
@@ -195,7 +261,13 @@
     return true;
   }
   $('closeCatalog').onclick=()=>closeReview(); $('closePlan').onclick=closePlanner;
-  window.walletCashbackBack=()=>{if(!review.hidden){closeReview();return true;}const discard=$('discardDialog');if(discard&&!discard.hidden){$('discardStay').click();return true;}if(!planner.hidden){closePlanner();return true;}return false;};
+  window.walletCashbackBack=()=>{
+    if(!review.hidden){void closeReview(true);return true;}
+    const discard=$('discardDialog');
+    if(discard&&!discard.hidden){$('discardStay').click();return true;}
+    if(!planner.hidden){closePlanner();return true;}
+    return false;
+  };
   window.addEventListener('beforeunload',e=>{if(dirty || planDirty){e.preventDefault(); e.returnValue='';}});
   for(const [dialog,close] of [[review,closeReview],[planner,closePlanner]]){dialog.onclick=e=>{if(e.target===dialog)close();}; dialog.onkeydown=e=>{
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;} if(e.key!=='Tab')return;

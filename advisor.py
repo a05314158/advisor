@@ -294,6 +294,16 @@ def create_app(db_path):
             return JSONResponse({'message': 'Неверный логин или пароль'}, 401)
         return session_response({'login': key}, 200, user[0], request)
 
+    @app.post('/api/auth/guest', status_code=201)
+    def auth_guest(request: Request):
+        session = secrets.token_urlsafe(32)
+        login = f"g{secrets.token_hex(6)}"
+        password = secrets.token_urlsafe(12)
+        with connect(db_path) as db:
+            db.execute('INSERT INTO users(session,login,password_hash,created_on) VALUES (?, ?, ?, ?)',
+                       (session, login, hash_password(password), datetime.now(UTC).date().isoformat()))
+        return session_response({'login': login, 'guest': True}, 201, session, request)
+
     @app.post('/api/auth/logout', status_code=204)
     def logout():
         response = Response(status_code=204)

@@ -1,0 +1,10 @@
+from pathlib import Path
+html = Path("wallet.html").read_text(encoding="utf-8")
+start = html.find("function renderCarousel()")
+end = html.find("function applyCarouselTransforms()")
+Path("_render_carousel.js").write_text(html[start:end], encoding="utf-8")
+print("len", end-start)
+start2 = html.find("function renderPocket()")
+end2 = html.find("const carouselPos=")
+Path("_render_pocket.js").write_text(html[start2:end2], encoding="utf-8")
+print("pocket", end2-start2)
