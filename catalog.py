@@ -5,7 +5,44 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-CATEGORIES = {'supermarkets': 'Супермаркеты', 'cafe': 'Кафе', 'fuel': 'АЗС'}
+CATEGORIES = {
+    'supermarkets': 'Супермаркеты', 'cafe': 'Кафе', 'fuel': 'АЗС',
+    'pharmacy': 'Аптеки', 'transport': 'Транспорт', 'clothing': 'Одежда',
+    'electronics': 'Электроника', 'marketplace': 'Маркетплейсы',
+    'entertainment': 'Развлечения', 'utilities': 'Связь и ЖКХ',
+    'travel': 'Путешествия', 'all': 'Все покупки',
+}
+BANKS = (
+    ('sber', 'СберБанк', '#0C8C50', '#FFFFFF', ''),
+    ('vtb', 'ВТБ', '#0050D8', '#FFFFFF', ''),
+    ('gazprombank', 'Газпромбанк', '#122C68', '#FFFFFF', ''),
+    ('alfabank', 'Альфа-Банк', '#E52030', '#FFFFFF', ''),
+    ('rshb', 'Россельхозбанк', '#225735', '#FFFFFF', ''),
+    ('domrf', 'Банк ДОМ.РФ', '#24282C', '#FFFFFF', ''),
+    ('tbank', 'Т-Банк', '#191919', '#FFFFFF', '#FFDD2D'),
+    ('mkb', 'Московский Кредитный Банк (МКБ)', '#8B2142', '#FFFFFF', ''),
+    ('sovcombank', 'Совкомбанк', '#007CB5', '#FFFFFF', ''),
+    ('raiffeisen', 'Райффайзенбанк', '#FEE600', '#161616', ''),
+    ('novikom', 'Новиком', '#40377C', '#FFFFFF', ''),
+    ('rossiya', 'Банк «Россия»', '#84252E', '#FFFFFF', ''),
+    ('rencap', 'РенКап Банк', '#642B65', '#FFFFFF', ''),
+    ('bspb', 'Банк «Санкт-Петербург»', '#BF2350', '#FFFFFF', ''),
+    ('akbars', 'Ак Барс Банк', '#007D6A', '#FFFFFF', ''),
+    ('ozon', 'Ozon Банк', '#005BFF', '#FFFFFF', ''),
+    ('otp', 'ОТП Банк', '#A8D500', '#161616', ''),
+    ('uralsib', 'Уралсиб', '#2846A0', '#FFFFFF', ''),
+    ('mts', 'МТС Банк', '#E30613', '#FFFFFF', ''),
+    ('unicredit', 'ЮниКредит Банк', '#D8DCE3', '#161616', ''),
+)
+
+
+def bank_names():
+    return {bank[0]: bank[1] for bank in BANKS}
+
+
+def bank_public():
+    return [{'id': bank[0], 'name': bank[1], 'color': bank[2], 'ink': bank[3], 'accent': bank[4]}
+            for bank in BANKS]
 SEED = [dict(cardId=c, categoryId=k, rateBps=r, limitKopecks=l, minAmountKopecks=m,
              validFrom='2026-11-01', validUntilExclusive='2027-11-01', updatedOn='2026-11-01')
         for c,k,r,l,m in [('A','supermarkets',1000,10000,1), ('B','supermarkets',600,30000,1),
@@ -34,12 +71,34 @@ def setup(db):
         CREATE TABLE IF NOT EXISTS saved (
           session TEXT, cardId TEXT, PRIMARY KEY(session, cardId)
         );
+        CREATE TABLE IF NOT EXISTS users (
+          session TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL, created_on TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS manual_cards (
           session TEXT NOT NULL, card_id TEXT NOT NULL, name TEXT NOT NULL,
           updated_on TEXT NOT NULL, rules_json TEXT NOT NULL,
           PRIMARY KEY(session, card_id)
         );
+        CREATE TABLE IF NOT EXISTS purchases (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session TEXT NOT NULL, bought_on TEXT NOT NULL, category_id TEXT NOT NULL,
+          amount_kopecks INTEGER NOT NULL,
+          recommended_card TEXT NOT NULL, recommended_name TEXT NOT NULL, recommended_kopecks INTEGER NOT NULL,
+          chosen_card TEXT NOT NULL, chosen_name TEXT NOT NULL, chosen_kopecks INTEGER NOT NULL,
+          usual_kopecks INTEGER, catalog_version TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS usual_card (
+          session TEXT PRIMARY KEY, card_id TEXT NOT NULL
+        );
     ''')
+    columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
+    if 'password_hash' not in columns:
+        db.execute('DROP TABLE users')
+        db.execute('''CREATE TABLE users (
+          session TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL, created_on TEXT NOT NULL
+        )''')
 
 
 def rows(db):
