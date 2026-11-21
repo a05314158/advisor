@@ -163,6 +163,10 @@ def create_app(db_path):
     def home():
         return HTMLResponse(app.state.html, headers={'Cache-Control': 'no-store'})
 
+    @app.get('/bank-link-test', include_in_schema=False)
+    def bank_link_test():
+        return FileResponse(PAGE.with_name('bank-link-test.html'), headers={'Cache-Control': 'no-store'})
+
     @app.get('/classic', include_in_schema=False)
     def classic():
         return FileResponse(PAGE.with_name('index.html'))

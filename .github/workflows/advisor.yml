@@ -58,6 +58,7 @@ jobs:
             if python deploy/smoke.py http://127.0.0.1:8766 --revision "$GITHUB_SHA"; then
               python tests/browser_mvp.py http://127.0.0.1:8766
               python tests/browser_wallet.py http://127.0.0.1:8766
+              python tests/browser_bank_links.py http://127.0.0.1:8766
               exit 0
             fi
             sleep 1
