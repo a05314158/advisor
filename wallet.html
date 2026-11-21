@@ -124,10 +124,12 @@
           <button id="buyAll" type="button" aria-pressed="false">Весь каталог</button>
         </div>
         <p id="purchaseOrigin" hidden>Учебный каталог. Условия демонстрационные.</p>
+        <button id="changeBuyCategory" class="back" type="button" aria-controls="categoryGrid" aria-expanded="true" hidden></button>
         <div id="categoryGrid" class="category-grid"></div>
         <label class="buy-label" for="buyAmount">Сумма, ₽</label>
         <input id="buyAmount" class="buy-amount" inputmode="decimal" autocomplete="off" placeholder="2500" maxlength="13">
         <div class="status" id="buyStatus" role="status" aria-live="polite"></div>
+        <button class="back" id="retryBuy" type="button" hidden>Повторить расчёт</button>
         <h3 id="buyRankingTitle" hidden>Топ-3 по кэшбэку</h3><div class="result-list" id="buyResults"></div>
         <details id="allBuyResults" hidden><summary>Все подходящие карты</summary><div class="result-list" id="otherBuyResults"></div></details>
         <details id="purchaseCatalog" hidden><summary>Карты и условия каталога</summary><div class="purchase-catalog" id="catalogCards"></div></details>
@@ -252,7 +254,15 @@
     $('openCards').addEventListener('click',showCards);
     $('buyBack').addEventListener('click',showHome);
     $('cardsBack').addEventListener('click',showHome);
-    function paintCategories(){const grid=$('categoryGrid');grid.replaceChildren();const available={...categories};if(buyScope==='all'){for(const key of Object.keys(available))if(!catalogCategories.has(key))delete available[key]}else for(const card of manual)for(const rule of card.rules||[]){if(rule.categoryId&&!available[rule.categoryId])available[rule.categoryId]=rule.label||rule.categoryId}if(!Object.hasOwn(available,buyCategory))buyCategory='';for(const [id,name] of Object.entries(available)){const button=document.createElement('button');button.type='button';button.dataset.id=id;button.setAttribute('aria-pressed',String(buyCategory===id));button.innerHTML=`<span class="category-mark">${escapeHtml(name.charAt(0))}</span><span>${escapeHtml(name)}</span>`;button.addEventListener('click',()=>{buyCategory=id;for(const item of grid.children)item.setAttribute('aria-pressed',String(item===button));renderPurchaseCatalog();runBuy()});grid.append(button)}}
+    function updateCategoryPicker(expanded) {
+      const button=$('changeBuyCategory');
+      button.hidden=!buyCategory;
+      button.textContent=buyCategory?(categories[buyCategory]||buyCategory)+' · Изменить':'';
+      button.setAttribute('aria-expanded',String(expanded));
+      $('categoryGrid').hidden=!expanded;
+    }
+    $('changeBuyCategory').onclick=()=>updateCategoryPicker($('categoryGrid').hidden);
+    function paintCategories(){const grid=$('categoryGrid');grid.replaceChildren();const available={...categories};if(buyScope==='all'){for(const key of Object.keys(available))if(!catalogCategories.has(key))delete available[key]}else for(const card of manual)for(const rule of card.rules||[]){if(rule.categoryId&&!available[rule.categoryId])available[rule.categoryId]=rule.label||rule.categoryId}if(!Object.hasOwn(available,buyCategory))buyCategory='';for(const [id,name] of Object.entries(available)){const button=document.createElement('button');button.type='button';button.dataset.id=id;button.setAttribute('aria-pressed',String(buyCategory===id));button.innerHTML=`<span class="category-mark">${escapeHtml(name.charAt(0))}</span><span>${escapeHtml(name)}</span>`;button.addEventListener('click',()=>{buyCategory=id;for(const item of grid.children)item.setAttribute('aria-pressed',String(item===button));updateCategoryPicker(false);$('changeBuyCategory').focus();renderPurchaseCatalog();runBuy()});grid.append(button)}updateCategoryPicker(!buyCategory)}
     let catalogCategories=new Set(Object.keys(categories));
     function setBuyScope(scope) {
       buyScope=scope;
@@ -308,7 +318,7 @@
       if (calc.beforeLimitsKopecks!==calc.afterCategoryLimitKopecks) terms.push(`После лимита по условию: ${money(calc.afterCategoryLimitKopecks)}`);
       if (calc.monthlyRemainingKopecks!==null) terms.push(`Остаток месяца: ${money(calc.monthlyRemainingKopecks)}${calc.monthlyUsageKnown?'':' · начисления не указаны'}`);
       terms.push(`Ожидаемый кэшбэк: ${money(item.cashbackKopecks)}`);
-      card.innerHTML=`<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index===0&&total>1?'Лучшая · ':''}${escapeHtml(money(item.cashbackKopecks))}</small><details><summary>Условия</summary>${termList(terms)}</details></div>${own?'<button class="pick" type="button">Выбрать</button>':''}`;
+      card.innerHTML=`<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index===0&&total>1?'Лучшая · ':''}${escapeHtml(money(item.cashbackKopecks))}</small><details><summary>Условия</summary>${termList(terms)}</details></div>${own?'<button class="pick" type="button">Записать покупку</button>':''}`;
       if (own) card.querySelector('button').onclick=()=>lockPurchase(item.cardId);
       if (item.bankAccess) {
         const link=document.createElement('a');link.className='bank-result-link';link.href=item.bankAccess.webUrl;
@@ -318,7 +328,9 @@
       return card;
     }
     function kopecksOf(value){const text=value.replace(/\s/g,'').replace(',','.');return /^\d+(\.\d{1,2})?$/.test(text)?Math.round(Number(text)*100):0}
+    $('retryBuy').onclick=runBuy;
     async function runBuy() {
+      $('retryBuy').hidden=true;
       const token = ++buyToken;
       const amount = kopecksOf($('buyAmount').value);
       $('buyResults').replaceChildren();
@@ -337,12 +349,15 @@
         if (token !== buyToken) return;
         $('buyStatus').textContent=data.top3.length?'':buyScope==='mine'?'У ваших карт нет подходящих условий. Сравните весь каталог.':'В каталоге нет подходящих условий';
         $('buyRankingTitle').hidden=!data.top3.length;
+        $('buyRankingTitle').textContent=buyScope==='mine'?'Топ-3 · Мои карты':'Топ-3 · Весь каталог';
         $('allBuyResults').hidden=data.allMatches.length<=data.top3.length;
         const row=(item,index)=>makePurchaseCard(item,index,buyScope==='mine',data.allMatches.length);
         $('buyResults').append(...data.top3.map(row));
         $('otherBuyResults').append(...data.allMatches.slice(data.top3.length).map((item,index)=>row(item,index+3)));
       } catch (error) {
-        if (token === buyToken) $('buyStatus').textContent = error.status===422?'Проверьте категорию и сумму':'Не удалось получить расчёт. Измените сумму или выберите категорию ещё раз.';
+        if (token !== buyToken) return;
+        $('buyStatus').textContent=error.status===422?'Проверьте категорию и сумму':'Не удалось получить расчёт.';
+        $('retryBuy').hidden=error.status===422;
       }
     }
     let buyTimer=0;
@@ -415,7 +430,20 @@
     $('addCardBtn').addEventListener('click',openAddCard);
     $('closeAdd').addEventListener('click',()=>{$('addDialog').hidden=true});
     $('addDialog').addEventListener('click',event=>{if(event.target===$('addDialog'))$('addDialog').hidden=true});
-    $('addCardForm').addEventListener('submit',async event=>{event.preventDefault();const bank=banks.find(item=>item.id===$('newBank').value);try{await api('/api/me/manual-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:bank.name,rules:[]})});$('addDialog').hidden=true;toast(`Добавлен ${bank.name}`);await load()}catch(error){toast(error.message)}});
+    $('addCardForm').addEventListener('submit',async event=>{
+      event.preventDefault();
+      const bank=banks.find(item=>item.id===$('newBank').value);
+      const button=event.submitter;
+      if (!bank||button.disabled) return;
+      button.disabled=true;
+      try {
+        const card=await api('/api/me/manual-cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:bank.name,rules:[]})});
+        $('addDialog').hidden=true;
+        await load();
+        document.dispatchEvent(new CustomEvent('wallet-card-added',{detail:{bankId:bank.id,cardId:card.cardId}}));
+      } catch(error) { toast(error.message); }
+      finally { button.disabled=false; }
+    });
     // Screenshot review and monthly planning are attached by wallet-cashback.js.
     let profileRequest=0;
     const chartColors=['#ddb900','#5378c4','#31866e','#bf627e','#8a6cb4','#b86d37'];

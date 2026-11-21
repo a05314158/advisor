@@ -35,6 +35,13 @@
     if (bank) $('bankId').value = bank.id;
     cardOptions(c?.cardId); $('bankId').focus();
   });
+  document.addEventListener('wallet-card-added', event => {
+    clearShot(); fromPlan = false; review.hidden = false;
+    target = event.detail;
+    $('bankId').value = target.bankId;
+    cardOptions(target.cardId);
+    startReview([{manual:true}], null, 'active');
+  });
   $('bankId').onchange = () => { clearShot(); cardOptions(); };
   $('cashbackCard').onchange = clearShot;
   $('cashbackShot').onchange = async () => {
@@ -104,10 +111,12 @@
     busy = true; $('saveReview').disabled = true; $('shotError').textContent = 'Сохраняем…'; $('reviewForm').inert = true;
     const response = await post('cashback-confirm', {...body,requestId:replay.key});
     if (mode === 'offer') { const key = offerKey(response?.cardId || target.cardId,body.month), combined = new Map((sessionOffers.get(key)?.rules || []).map(r => [r.label,r])); for (const r of rules) combined.set(r.label,r); sessionOffers.set(key,{slots:body.slots,rules:[...combined.values()]}); }
-    busy = false; closeReview(); invalidatePlan(); toast(mode === 'offer' ? 'Предложения сохранены для планирования' : 'Подключённые категории сохранены'); await load();
+    busy = false; closeReview(true); invalidatePlan(); toast(mode === 'offer' ? 'Предложения сохранены для планирования' : 'Подключённые категории сохранены'); await load();
     } catch(e) { fail(e,$('shotError')); } finally { busy = false; $('saveReview').disabled = false; $('reviewForm').inert = false; }
   };
-  function closeReview() { if (busy) return; clearShot(); review.hidden = true; $('reviewRows').replaceChildren(); if (fromPlan) { planner.hidden = false; $('calculatePlan').focus(); } else $('addCashbackBtn').focus(); fromPlan = false; }
+  function closeReview(saved = false) { if (busy) return;
+    const hasDraft = !$('reviewForm').hidden && [...$('reviewRows').querySelectorAll('input:not([type=checkbox])')].some(field => field.value.trim());
+    if (saved !== true && hasDraft && !window.confirm('Закрыть без сохранения введённых условий?')) return; clearShot(); review.hidden = true; $('reviewRows').replaceChildren(); if (fromPlan) { planner.hidden = false; $('calculatePlan').focus(); } else $('addCashbackBtn').focus(); fromPlan = false; }
   function closePlanner() { invalidatePlan(); planner.hidden = true; $('openPlan').focus(); }
   $('closeCatalog').onclick = closeReview; $('closePlan').onclick = closePlanner;
   for (const [dialog, close] of [[review,closeReview],[planner,closePlanner]]) {
