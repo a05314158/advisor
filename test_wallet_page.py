@@ -3,7 +3,8 @@ from pathlib import Path
 
 
 PAGE = Path(__file__).with_name('wallet.html').read_text(encoding='utf-8')
-LEATHER = Path(__file__).resolve().parents[1].joinpath('leather-wallet.html').read_text(encoding='utf-8')
+# Reference silhouette from the original wallet artwork; no external file is required.
+POCKET = 'M43 72 Q45 51 68 51 Q192 43 322 57 Q346 59 347 82 L343 210 Q342 251 304 256 Q190 267 80 252 Q44 247 41 213 Q37 146 43 72Z'
 
 
 class WalletPage(unittest.TestCase):
@@ -18,8 +19,7 @@ class WalletPage(unittest.TestCase):
         self.assertNotIn('id="lining"', PAGE)
 
     def test_leather_file_is_the_wallet(self):
-        pocket = LEATHER.split('id="pocket"', 1)[1].split('/>', 1)[0]
-        self.assertIn(pocket, PAGE)
+        self.assertIn(f'<path id="pocket" d="{POCKET}"/>', PAGE)
         self.assertLess(PAGE.index('id="pocketCards"'), PAGE.index('class="front"'))
 
     def test_hero_tags_balance(self):
@@ -53,6 +53,9 @@ class WalletPage(unittest.TestCase):
         self.assertIn('id="openCards"', PAGE)
         self.assertIn('id="buyAmount"', PAGE)
         self.assertIn('id="showStatsBtn"', PAGE)
+        self.assertIn('id="openPlan"', PAGE)
+        self.assertIn('src="/wallet-cashback.js"', PAGE)
+        self.assertIn("defineProperty(window,name", PAGE)
 
     def test_card_arc_uses_pointer_swipe_and_keyboard(self):
         self.assertIn('id="cardCarousel"', PAGE)

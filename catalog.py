@@ -80,6 +80,16 @@ def setup(db):
           updated_on TEXT NOT NULL, rules_json TEXT NOT NULL,
           PRIMARY KEY(session, card_id)
         );
+        CREATE TABLE IF NOT EXISTS cashback_sets (
+          session TEXT NOT NULL, card_id TEXT NOT NULL, bank_id TEXT NOT NULL,
+          month TEXT NOT NULL, mode TEXT NOT NULL, slots INTEGER, rules_json TEXT NOT NULL,
+          PRIMARY KEY(session, card_id, month, mode)
+        );
+        CREATE TABLE IF NOT EXISTS wallet_requests (
+          session TEXT NOT NULL, operation TEXT NOT NULL, request_id TEXT NOT NULL,
+          digest TEXT NOT NULL, response_json TEXT NOT NULL,
+          PRIMARY KEY(session, operation, request_id)
+        );
         CREATE TABLE IF NOT EXISTS purchases (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           session TEXT NOT NULL, bought_on TEXT NOT NULL, category_id TEXT NOT NULL,
@@ -94,11 +104,14 @@ def setup(db):
     ''')
     columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
     if 'password_hash' not in columns:
-        db.execute('DROP TABLE users')
-        db.execute('''CREATE TABLE users (
-          session TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
-          password_hash TEXT NOT NULL, created_on TEXT NOT NULL
-        )''')
+        # Old sessions and their wallet rows must survive an upgrade. An empty
+        # hash cannot authenticate via password and does not invent credentials.
+        db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+    if 'login' not in columns:
+        db.execute('ALTER TABLE users ADD COLUMN login TEXT')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_login ON users(login)')
+    if 'created_on' not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN created_on TEXT NOT NULL DEFAULT ''")
 
 
 def rows(db):
