@@ -223,16 +223,8 @@ def session_id(request):
     return value if re.fullmatch(r'[A-Za-z0-9_-]{43}', value) else None
 
 
-def create_app(db_path):
-    @asynccontextmanager
-    async def lifespan(_):
-        initialize(db_path)
-        yield
-
-    app = FastAPI(title='Советник', lifespan=lifespan)
+def mount_wallet(app):
     app.mount('/static', StaticFiles(directory=PAGE.parent / 'static'), name='static')
-
-    mount_observability(app)
 
     @app.get('/')
     def home():
@@ -255,6 +247,20 @@ def create_app(db_path):
     def pocket():
         return FileResponse(PAGE.with_name('pocket.webp'), media_type='image/webp')
 
+
+def create_app(db_path, *, include_wallet=True):
+    @asynccontextmanager
+    async def lifespan(_):
+        initialize(db_path)
+        yield
+
+    app = FastAPI(title='Советник', lifespan=lifespan)
+
+    mount_observability(app)
+
+    if include_wallet:
+        mount_wallet(app)
+
     @app.get('/api/auth/me')
     def auth_me(request: Request):
         session = session_id(request)
@@ -274,10 +280,11 @@ def create_app(db_path):
         session = secrets.token_urlsafe(32)
         login = login.lower()
         with connect(db_path) as db:
-            if db.execute('SELECT 1 FROM users WHERE login = ?', (login,)).fetchone():
+            created = db.execute('''INSERT INTO users(session,login,password_hash,created_on) VALUES (?, ?, ?, ?)
+                ON CONFLICT(login) DO NOTHING''',
+                (session, login, hash_password(password), datetime.now(UTC).date().isoformat()))
+            if not created.rowcount:
                 return JSONResponse({'message': 'Такой логин уже есть'}, 409)
-            db.execute('INSERT INTO users(session,login,password_hash,created_on) VALUES (?, ?, ?, ?)',
-                       (session, login, hash_password(password), datetime.now(UTC).date().isoformat()))
         return session_response({'login': login}, 201, session, request)
 
     @app.post('/api/auth/login')
@@ -416,7 +423,7 @@ def create_app(db_path):
         card = 'manual-' + secrets.token_hex(12)
         today = datetime.now(UTC).date().isoformat()
         with connect(db_path) as db:
-            db.execute('INSERT INTO manual_cards VALUES (?, ?, ?, ?, ?)',
+            db.execute('INSERT INTO manual_cards(session,card_id,name,updated_on,rules_json) VALUES (?, ?, ?, ?, ?)',
                        (session, card, name.strip(), today, json.dumps(cleaned)))
         response = JSONResponse({'cardId': card}, 201)
         response.set_cookie(COOKIE, session, httponly=True, samesite='strict', max_age=31536000, path='/',
@@ -473,7 +480,10 @@ def create_app(db_path):
             if status in (401, 403):
                 return JSONResponse({'message': 'Сервис распознавания не принял ключ'}, 502)
             return JSONResponse({'message': 'Не удалось разобрать категории. Попробуйте ещё раз'}, 502)
-        except (httpx.HTTPError, KeyError, TypeError, RuntimeError) as error:
+        except RuntimeError:
+            logging.getLogger('advisor').warning('cashback recognition is not configured')
+            return JSONResponse({'message': 'Распознавание на стенде не настроено. Введите условия вручную'}, 503)
+        except (httpx.HTTPError, KeyError, TypeError) as error:
             logging.getLogger('advisor').warning('cashback %s', type(error).__name__)
             return JSONResponse({'message': 'Не удалось разобрать категории. Попробуйте ещё раз'}, 502)
         return rules if isinstance(rules, dict) else {'rules': rules}
@@ -497,7 +507,7 @@ def create_app(db_path):
             removed = db.execute('DELETE FROM manual_cards WHERE session = ? AND card_id = ?', (session, card))
             db.execute('DELETE FROM cashback_sets WHERE session = ? AND card_id = ?', (session, card))
             if removed.rowcount:
-                db.execute('DELETE FROM usual_card WHERE session = ? AND card_id = ?', (session, card))
+                delete_card_settings(db, session, card)
         return Response(status_code=204)
 
     @app.put('/api/me/cards/{card}', status_code=204)
@@ -506,7 +516,7 @@ def create_app(db_path):
         with connect(db_path) as db:
             if not db.execute('SELECT 1 FROM rules WHERE cardId = ? LIMIT 1', (card,)).fetchone():
                 return JSONResponse({'code': 'unknown_card'}, 404)
-            db.execute('INSERT OR IGNORE INTO saved VALUES (?, ?)', (session, card))
+            db.execute('INSERT OR IGNORE INTO saved(session,cardId) VALUES (?, ?)', (session, card))
         response = Response(status_code=204)
         response.set_cookie(COOKIE, session, httponly=True, samesite='strict', max_age=31536000, path='/',
                             secure=request.url.scheme == 'https')
@@ -518,8 +528,13 @@ def create_app(db_path):
             session = session_id(request)
             removed = db.execute('DELETE FROM saved WHERE session = ? AND cardId = ?', (session, card))
             if removed.rowcount:
-                db.execute('DELETE FROM usual_card WHERE session = ? AND card_id = ?', (session, card))
+                delete_card_settings(db, session, card)
         return Response(status_code=204)
+
+    def delete_card_settings(db, session, card):
+        db.execute('DELETE FROM wallet_monthly_limits WHERE session = ? AND card_id = ?', (session, card))
+        db.execute('DELETE FROM wallet_monthly_usage WHERE session = ? AND card_id = ?', (session, card))
+        db.execute('DELETE FROM usual_card WHERE session = ? AND card_id = ?', (session, card))
 
     def personal_caps(db, session, month):
         return {card: (cap, used) for card, cap, used in db.execute('''
