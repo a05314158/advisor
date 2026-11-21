@@ -696,43 +696,12 @@ $('manual-form').onsubmit = async event => {
   }, 'Карта сохранена.');
 };
 
-function bankActions(match) {
-  const actions = element('div', '', 'stack');
-  const access = match.bankAccess;
-  const web = element('a', 'Открыть ' + access.name + ' в браузере', 'outbound secondary');
-  web.href = access.webUrl;
-  web.target = '_blank';
-  web.rel = 'noopener noreferrer';
-  actions.append(web);
-  if (access.id !== 'tbank') return actions;
-  const details = element('details');
-  const body = element('div', '', 'stack');
-  const field = element('label', 'Ссылка T‑Pay от продавца');
-  const input = element('input');
-  input.type = 'url';
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.maxLength = 512;
-  const message = element('p', '', 'muted');
-  message.setAttribute('role', 'status');
-  const pay = element('a', '', 'outbound');
-  pay.rel = 'noreferrer';
-  pay.hidden = true;
-  input.oninput = () => {
-    const link = input.value.trim();
-    const valid = /^https:\/\/o\.tbank\.ru\/tpay\/[A-Za-z0-9_-]{1,160}$/.test(link);
-    message.textContent = link && !valid ? 'Вставьте ссылку T‑Pay от продавца. Ссылки СБП здесь не подходят.' : '';
-    pay.hidden = !valid;
-    if (valid) pay.href = link;
-    else pay.removeAttribute('href');
-  };
-  pay.textContent = 'Перейти к оплате через T‑Pay';
-  field.append(input);
-  body.append(field, message, pay, element('small',
-    'Перед подтверждением проверьте магазин, сумму и карту списания на стороне Т‑Банка.'));
-  details.append(element('summary', 'Оплатить через T‑Pay'), body);
-  actions.append(details);
-  return actions;
+function bankLink(access) {
+  const link = element('a', 'Открыть ' + access.name + ' в браузере', 'outbound secondary');
+  link.href = access.webUrl;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  return link;
 }
 
 function resultCard(match, winner = false) {
@@ -764,7 +733,7 @@ function resultCard(match, winner = false) {
   );
   if (winner && match.bankAccess &&
       (saved.has(match.cardId) || manual.some(card => card.cardId === match.cardId))) {
-    entry.append(bankActions(match));
+    entry.append(bankLink(match.bankAccess));
   }
   return entry;
 }
