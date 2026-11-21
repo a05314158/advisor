@@ -54,7 +54,7 @@
     } catch (e) { if (token === draftEpoch) fail(e, $('shotError')); }
     finally { if (token === draftEpoch) { $('confirmCard').disabled = false; $('confirmCard').textContent = 'Прочитать снимок'; } }
   };
-  $('manualDraft').onclick = () => { try { target = chooseTarget(); startReview([{}], null, 'offer'); } catch (e) { fail(e,$('shotError')); } };
+  $('manualDraft').onclick = () => { try { target = chooseTarget(); startReview([{manual:true}], null, 'active'); } catch (e) { fail(e,$('shotError')); } };
   function labelled(parent, title, control, cls) { const label = node('label', title, cls); label.append(control); parent.append(label); return control; }
   function input(parent, key, title, value, cls) { const field = node('input'); field.dataset.key = key; field.value = value ?? ''; labelled(parent, title, field, cls); return field; }
   function row(rule) {
@@ -66,7 +66,7 @@
     const label = input(grid,'label','Название в банке',rule.label,'wide'); label.maxLength = 80;
     const category = input(grid,'categoryId','Категория для расчёта (пусто — по названию)',rule.categoryId,'wide'); category.setAttribute('list','cbCategoryIds');
     [['rateBps','Ставка, %'],['limitKopecks','Лимит, ₽'],['minAmountKopecks','Покупка от, ₽']].forEach(([key,title]) => { const field = input(grid,key,title,rule[key] == null ? '' : rule[key] / 100); field.inputMode = 'decimal'; });
-    const include = node('input'); include.type = 'checkbox'; include.dataset.key = 'include';
+    const include = node('input'); include.type = 'checkbox'; include.dataset.key = 'include'; include.checked = rule.manual === true;
     labelled(box, 'Подтверждаю эту строку',include,'cb-check');
     const remove = node('button','Убрать строку'); remove.type = 'button'; remove.onclick = () => { box.remove(); $('addRule').focus(); }; box.append(remove);
     box.dataset.selected = JSON.stringify(rule.selected ?? null); $('reviewRows').append(box); return label;
@@ -99,7 +99,7 @@
       rules.push({label, categoryId:fields.categoryId.value.trim() || label, rateBps, limitKopecks:hundredths(fields.limitKopecks.value,null,'Лимит'), minAmountKopecks:hundredths(fields.minAmountKopecks.value,1,'Минимальная покупка'), selected:true, uncertain:false});
     }
     if (!rules.length) throw new Error('Отметьте хотя бы одну проверенную строку.');
-    const body = {...target, month:$('reviewMonth').value, mode, slots:Number($('reviewSlots').value), rules};
+    const body = {...target, month:$('reviewMonth').value, mode, slots:$('reviewSlots').value ? Number($('reviewSlots').value) : null, rules};
     const signature = JSON.stringify(body); if (replay?.signature !== signature) replay = {signature, key:newKey()};
     busy = true; $('saveReview').disabled = true; $('shotError').textContent = 'Сохраняем…'; $('reviewForm').inert = true;
     const response = await post('cashback-confirm', {...body,requestId:replay.key});

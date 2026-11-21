@@ -25,12 +25,15 @@ def check(base, revision=None):
     products = json.loads(read(base, '/api/cards?categoryId=' + category))
     expected = []
     for card in products:
+        candidate = []
         for rule in card['rules']:
-            if rule['categoryId'] != category or rule['minAmountKopecks'] > amount:
+            if rule['categoryId'] not in (category, 'all') or rule['minAmountKopecks'] > amount:
                 continue
             raw = (amount * rule['rateBps'] + 5000) // 10_000
             cap = rule['limitKopecks']
-            expected.append((card['cardId'], raw if cap is None else min(raw, cap)))
+            candidate.append((rule['categoryId'] == category, raw if cap is None else min(raw, cap)))
+        if candidate:
+            expected.append((card['cardId'], max(candidate)[1]))
     expected.sort(key=lambda row: (-row[1], row[0]))
 
     payload = dict(categoryId=category, amountKopecks=amount, scope='all')

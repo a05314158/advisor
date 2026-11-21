@@ -135,6 +135,29 @@ class Cashback(unittest.TestCase):
         with connect(legacy) as db:
             self.assertEqual(db.execute('SELECT login FROM users').fetchall(), [('old',)])
 
+    def test_edit_rate_preserves_monthly_limit_and_never_changes_public_catalog(self):
+        confirmed = self.confirm()
+        card = confirmed.json()['cardId']
+        limits = f'/api/me/cards/{card}/monthly'
+        rates = f'/api/me/manual-cards/{card}/rate'
+        config = {'limitKopecks': 5000, 'usedKopecks': 3500}
+        rank = dict(scope='mine', amountKopecks=50000, categoryId='Такси')
+        public = dict(scope='all', amountKopecks=250000, categoryId='supermarkets')
+        old_catalog = self.client.post('/api/recommendations', public).json()
+        self.assertEqual(self.client._request('PUT', limits, config).json()['remainingKopecks'], 1500)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 1500)
+        change = {'categoryId': 'Такси', 'label': 'Такси', 'rateBps': 200}
+        self.assertEqual(self.client._request('PATCH', rates, change).status_code, 204)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 1000)
+        self.assertEqual(self.client.get(limits).json(), dict(month=MONTH, remainingKopecks=1500, **config))
+        self.assertEqual(self.client.post('/api/recommendations', public).json(), old_catalog)
+        with API(self.app) as other:
+            self.login(other, 'another_owner')
+            self.assertEqual(other.get(limits).status_code, 404)
+            self.assertEqual(other._request('PATCH', rates, change).status_code, 404)
+        self.assertEqual(self.client._request('PUT', limits, {**config, 'usedKopecks':5000}).status_code, 200)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 0)
+
     def test_wallet_journal_on_database_from_previous_release(self):
         legacy = self.path.with_suffix('.staging')
         with connect(legacy) as db:

@@ -33,6 +33,7 @@ class Calculation(unittest.TestCase):
         result = recommend('supermarkets', 250000, date(2026, 11, 20), [SEED[0]])['top3'][0]
         self.assertEqual(result['cashbackKopecks'], 10000)
         self.assertTrue(result['limitApplied'])
-        self.assertNotIn('calculation', result)
+        self.assertEqual(result['calculation']['beforeLimitsKopecks'], 25000)
+        self.assertEqual(result['calculation']['afterCategoryLimitKopecks'], 10000)
         match = self.query(amount=105)['top3'][0]
         self.assertEqual(match['cashbackKopecks'], 11)

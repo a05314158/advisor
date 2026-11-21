@@ -3,6 +3,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
 CATEGORIES = {
@@ -36,13 +37,28 @@ BANKS = (
 )
 
 
+@lru_cache(maxsize=1)
+def registry_banks():
+    return json.loads(Path(__file__).with_name('banks_ru.json').read_text(encoding='utf-8'))['banks']
+
+
+BRANDED_REGISTRATION_NUMBERS = {
+    '1481', '1000', '354', '1326', '3349', '2312', '2673', '1978', '963', '3292',
+    '2546', '328', '2557', '436', '2590', '3542', '2766', '2275', '2268', '1',
+}
+
+
 def bank_names():
-    return {bank[0]: bank[1] for bank in BANKS}
+    return {bank['id']: bank['name'] for bank in bank_public()}
 
 
 def bank_public():
-    return [{'id': bank[0], 'name': bank[1], 'color': bank[2], 'ink': bank[3], 'accent': bank[4]}
-            for bank in BANKS]
+    featured = [{'id': bank[0], 'name': bank[1], 'color': bank[2], 'ink': bank[3], 'accent': bank[4]}
+                for bank in BANKS]
+    registry = [{'id': 'cbr-' + bank['registrationNumber'], 'name': bank['name'],
+                 'registrationNumber': bank['registrationNumber']}
+                for bank in registry_banks() if bank['registrationNumber'] not in BRANDED_REGISTRATION_NUMBERS]
+    return featured + registry
 SEED = [dict(cardId=c, categoryId=k, rateBps=r, limitKopecks=l, minAmountKopecks=m,
              validFrom='2026-11-01', validUntilExclusive='2027-11-01', updatedOn='2026-11-01')
         for c,k,r,l,m in [('A','supermarkets',1000,10000,1), ('B','supermarkets',600,30000,1),
@@ -99,6 +115,14 @@ def setup(db):
         CREATE TABLE IF NOT EXISTS usual_card (
           session TEXT PRIMARY KEY, card_id TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS wallet_monthly_limits (
+          session TEXT NOT NULL, card_id TEXT NOT NULL, limit_kopecks INTEGER,
+          PRIMARY KEY(session, card_id)
+        );
+        CREATE TABLE IF NOT EXISTS wallet_monthly_usage (
+          session TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL, used_kopecks INTEGER,
+          PRIMARY KEY(session, card_id, month)
+        );
     ''')
     db.execute(f'''
         CREATE TABLE IF NOT EXISTS {wallet_purchase_table(db)} (
@@ -120,6 +144,8 @@ def setup(db):
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_login ON users(login)')
     if 'created_on' not in columns:
         db.execute("ALTER TABLE users ADD COLUMN created_on TEXT NOT NULL DEFAULT ''")
+    db.execute('''CREATE TABLE IF NOT EXISTS catalog_cards (
+        id TEXT PRIMARY KEY, bank_name TEXT NOT NULL, name TEXT NOT NULL)''')
 
 
 def rows(db):
@@ -127,16 +153,23 @@ def rows(db):
 
 
 def apply_rules(db, items):
-    seen = set()
+    seen, names = set(), {}
     for rule in items:
-        if not isinstance(rule, dict) or set(rule) != set(FIELDS):
+        if not isinstance(rule, dict) or set(rule) - {'bankName', 'cardName'} != set(FIELDS):
             raise ValueError('Неверные поля условия')
         c, k, r, l, m, start, end, updated = (rule[f] for f in FIELDS)
         if (not isinstance(c, str) or not c.isascii() or not c.isalnum() or len(c) > 32
                 or not isinstance(k, str) or k not in CATEGORIES
-                or any(type(n) is not int for n in (r, l, m))
-                or not (0 <= r <= 10000 and 0 <= l <= 10**12 and 1 <= m <= 10**12)):
+                or any(type(n) is not int for n in (r, m)) or not (0 <= r <= 10000 and 1 <= m <= 10**12)
+                or (l is not None and (type(l) is not int or not 0 <= l <= 10**12))):
             raise ValueError('Неверные значения условия')
+        if 'bankName' in rule or 'cardName' in rule:
+            labels = rule.get('bankName'), rule.get('cardName')
+            if any(not isinstance(label, str) or not 1 <= len(label.strip()) <= 100 for label in labels):
+                raise ValueError('Укажите банк и название карты')
+            labels = tuple(label.strip() for label in labels)
+            if names.setdefault(c, labels) != labels:
+                raise ValueError(f'Разные названия для карты {c}')
         for d in (start, end, updated):
             if not isinstance(d, str) or date.fromisoformat(d).isoformat() != d:
                 raise ValueError('Ожидается дата YYYY-MM-DD')
@@ -150,6 +183,8 @@ def apply_rules(db, items):
         if previous and previous[0] == key and rule['validFrom'] < previous[1]:
             raise ValueError(f'Пересекающиеся периоды: {key}')
         previous = key, rule['validUntilExclusive']
+    db.executemany('INSERT OR REPLACE INTO catalog_cards VALUES (?, ?, ?)',
+                   ((card, *labels) for card, labels in names.items()))
 
 
 def import_catalog(path, items):

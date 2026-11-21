@@ -15,6 +15,20 @@
     #planResult h3{margin:16px 0 4px}#planResult p{margin:8px 0 0}
   </style>
   <style>.bank-result-link{display:inline-flex;align-items:center;min-height:44px;color:inherit;text-underline-offset:3px}</style>
+  <style>
+    .purchase-scope,.wallet-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+    .purchase-scope button,.wallet-actions button,.catalog-card button{min-height:44px;padding:8px 12px;border:1px solid currentColor;border-radius:10px;background:transparent;color:inherit;cursor:pointer}
+    .purchase-scope button[aria-pressed=true]{background:#ffdd2d;color:#211e16;border-color:#ffdd2d}
+    .purchase-catalog,.purchase-card{display:grid;gap:10px}.purchase-card .saved-info{min-width:0}
+    .purchase-card details,.catalog-card{width:100%;min-width:0;overflow-wrap:anywhere}
+    .purchase-card summary,.purchase-catalog summary,#allBuyResults summary{cursor:pointer;padding:8px 0}
+    .catalog-card{border-bottom:1px solid #8885;padding:8px 0 12px}
+    .purchase-card ul,.catalog-card ul{padding-inline-start:20px;margin:6px 0}
+    #purchaseOrigin,#editCardNote{font-size:.875rem;margin:8px 0}
+    #editCardDialog{color:inherit;max-width:min(400px,calc(100vw - 32px));max-height:90dvh;padding:0;border:0;border-radius:18px;background:Canvas}
+    #editCardDialog::backdrop{background:#0008}#editCardDialog .dialog-card{width:100%;max-height:85dvh;overflow:auto;box-sizing:border-box}
+    #editCardDialog .shot-form+form{margin-top:16px;border-top:1px solid #8885;padding-top:16px}
+  </style>
 </head>
 <body>
   <iframe id="welcomeScreen" title="Советник — больше кэшбэка" src="welcome.html" style="position:fixed;z-index:5;inset:0;width:100%;height:100dvh;border:0;background:#f6f3ed"></iframe>
@@ -83,19 +97,47 @@
       </div>
     </section>
     <section class="content" id="content" hidden aria-label="Кошелёк и расчёт">
-      <section id="buyPanel" class="panel buy-panel" hidden><button class="back" id="buyBack" type="button">Назад</button><h2>Покупка</h2><div id="categoryGrid" class="category-grid"></div><label class="buy-label" for="buyAmount">Сумма, ₽</label><input id="buyAmount" class="buy-amount" inputmode="decimal" autocomplete="off" placeholder="2500" maxlength="13"><div class="status" id="buyStatus" role="status" aria-live="polite"></div><div class="result-list" id="buyResults"></div></section>
+      <section id="buyPanel" class="panel buy-panel" hidden>
+        <button class="back" id="buyBack" type="button">Назад</button><h2>Покупка</h2>
+        <div class="purchase-scope" role="group" aria-label="Какие карты сравнивать">
+          <button id="buyMine" type="button" aria-pressed="true">Мои карты</button>
+          <button id="buyAll" type="button" aria-pressed="false">Весь каталог</button>
+        </div>
+        <p id="purchaseOrigin" hidden>Учебный каталог. Условия демонстрационные.</p>
+        <div id="categoryGrid" class="category-grid"></div>
+        <label class="buy-label" for="buyAmount">Сумма, ₽</label>
+        <input id="buyAmount" class="buy-amount" inputmode="decimal" autocomplete="off" placeholder="2500" maxlength="13">
+        <div class="status" id="buyStatus" role="status" aria-live="polite"></div>
+        <h3 id="buyRankingTitle" hidden>Топ-3 по кэшбэку</h3><div class="result-list" id="buyResults"></div>
+        <details id="allBuyResults" hidden><summary>Все подходящие карты</summary><div class="result-list" id="otherBuyResults"></div></details>
+        <details id="purchaseCatalog" hidden><summary>Карты и условия каталога</summary><div class="purchase-catalog" id="catalogCards"></div></details>
+      </section>
       <section class="panel" id="cardsPanel" hidden aria-labelledby="cards-title"><button class="back" id="cardsBack" type="button">Назад</button><div class="panel-header"><div><h2 id="cards-title">Мои карты</h2><p class="panel-subtitle" id="cardsSubtitle">Список карт</p></div><button class="add-button" id="openCatalog" type="button" aria-label="Добавить карту">+</button></div><div class="card-carousel" id="cardCarousel" tabindex="0" role="region" aria-roledescription="карусель" aria-label="Мои банковские карты"><div class="carousel-shadow" id="carouselShadow"></div><div class="carousel-track" id="carouselTrack"><div class="empty">Загружаем список…</div></div></div><div class="carousel-controls" id="carouselControls" hidden><button class="carousel-arrow" id="carouselPrev" type="button" aria-label="Предыдущая карта">‹</button><span class="carousel-position" id="carouselPosition" aria-live="polite"></span><button class="carousel-arrow" id="carouselNext" type="button" aria-label="Следующая карта">›</button></div><div class="card-carousel-details" id="carouselDetails" hidden></div><div class="saved-list" id="savedList" hidden></div><div class="card-tools"><button type="button" id="addCardBtn">Добавить карту</button><button type="button" id="addCashbackBtn">Добавить кешбек на карту</button><button type="button" id="showCashbackBtn">Посмотреть кешбек по картам</button><button type="button" id="openPlan">План кешбэка на месяц</button><button type="button" id="showStatsBtn">Статистика</button></div><div id="cashbackView" hidden></div><div class="stats-box" id="statsBox" hidden></div></section>
-      <section class="panel compare-panel" hidden aria-labelledby="compare-title"><div class="panel-header"><div><h2 id="compare-title">Перед оплатой</h2><p class="panel-subtitle">Сравним реальный возврат в рублях</p></div></div><form id="compareForm"><div class="field-grid"><div class="field"><label for="category">Категория покупки</label><select id="category" name="category"><option value="supermarkets">Супермаркеты</option><option value="cafe">Кафе</option><option value="fuel">АЗС</option></select></div><div class="field"><label for="amount">Сумма, ₽</label><input id="amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="2500" maxlength="13" required></div></div><button class="calculate" id="calculate" type="submit">Показать лучший возврат</button><div class="status" id="status" role="status" aria-live="polite"></div></form><div class="result-list" id="results"></div></section>
     </section>
   </main>
   <div class="dialog cashback-dialog" id="catalogDialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="dialogTitle">Условия кешбэка</h2><button class="close" id="closeCatalog" type="button" aria-label="Закрыть">×</button></div>
     <form class="shot-form" id="screenshotForm"><label>Банк<select id="bankId" required></select></label><label>Карта<select id="cashbackCard"></select></label><label class="shot-drop"><input id="cashbackShot" type="file" accept="image/*" aria-label="Снимок из галереи"><span id="shotPreview">Снимок из банка · JPG, PNG или WebP</span></label><button class="confirm" id="confirmCard" type="submit">Прочитать снимок</button><button id="manualDraft" type="button">Ввести условия вручную</button></form>
-    <form class="shot-form" id="reviewForm" hidden><p class="cb-note" id="reviewContext"></p><label>Месяц действия<input type="month" id="reviewMonth" required></label><label>Что сохранить<select id="reviewMode"><option value="offer">Предложения для выбора</option><option value="active">Уже подключённые в банке категории</option></select></label><label>Сколько категорий разрешает выбрать банк<input type="number" min="1" step="1" id="reviewSlots" required></label><p id="reviewHint" class="cb-note"></p><p class="cb-note" id="reviewWarnings" role="status"></p><div id="reviewRows"></div><button type="button" id="addRule">Добавить строку</button><button type="submit" class="confirm" id="saveReview">Сохранить предложения</button></form><p id="shotError" class="auth-error" role="alert"></p>
+    <form class="shot-form" id="reviewForm" hidden><p class="cb-note" id="reviewContext"></p><label>Месяц действия<input type="month" id="reviewMonth" required></label><label>Что сохранить<select id="reviewMode"><option value="offer">Предложения для выбора</option><option value="active">Уже подключённые в банке категории</option></select></label><label>Сколько категорий разрешает выбрать банк (если известно)<input type="number" min="1" step="1" id="reviewSlots"></label><p id="reviewHint" class="cb-note"></p><p class="cb-note" id="reviewWarnings" role="status"></p><div id="reviewRows"></div><button type="button" id="addRule">Добавить строку</button><button type="submit" class="confirm" id="saveReview">Сохранить предложения</button></form><p id="shotError" class="auth-error" role="alert"></p>
   </div></div>
   <div class="dialog cashback-dialog" id="planDialog" role="dialog" aria-modal="true" aria-labelledby="planTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="planTitle">План кешбэка</h2><button class="close" id="closePlan" aria-label="Закрыть" type="button">×</button></div><form id="planForm" class="shot-form"><label>Месяц выбора<input id="planMonth" type="month" required></label><label>Траты для прогноза<select id="spendingSource"><option value="history">Из истории покупок</option><option value="manual">Ввести суммы по категориям</option></select></label><label id="spendingPeriod">Месяц покупок<input id="spendingMonth" type="month" required></label><div id="spendingInputs" hidden></div><button class="confirm" id="calculatePlan" type="submit">Сравнить варианты</button></form><div id="planResult" aria-live="polite"></div><p id="planError" class="auth-error" role="alert"></p></div></div>
-  <div class="dialog" id="addDialog" role="dialog" aria-modal="true" aria-labelledby="addTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="addTitle">Добавить карту</h2><button class="close" id="closeAdd" type="button" aria-label="Закрыть">×</button></div><form id="addCardForm"><label for="newBank">Банк<select id="newBank" required></select></label><button class="confirm" type="submit">Добавить</button></form></div></div>
-  <div class="dialog" id="settingsDialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="settingsTitle">Настройки</h2><button class="close" id="closeSettings" type="button" aria-label="Закрыть">×</button></div><label for="usualCard">Обычная карта<select id="usualCard"><option value="">Не выбрана</option></select></label><p>Остальное добавим сюда позже.</p></div></div>
+  <div class="dialog" id="addDialog" role="dialog" aria-modal="true" aria-labelledby="addTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="addTitle">Добавить карту</h2><button class="close" id="closeAdd" type="button" aria-label="Закрыть">×</button></div><form id="addCardForm"><label>Поиск по названию или номеру<input id="newBankSearch" type="search" autocomplete="off"></label><label for="newBank">Банк<select id="newBank" required></select></label><button class="confirm" type="submit">Добавить</button></form></div></div>
+  <div class="dialog" id="settingsDialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden><div class="dialog-card"><div class="dialog-head"><h2 id="settingsTitle">Настройки</h2><button class="close" id="closeSettings" type="button" aria-label="Закрыть">×</button></div><label for="usualCard">Обычная карта<select id="usualCard"><option value="">Не выбрана</option></select></label></div></div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="editCardDialog" aria-labelledby="editCardTitle"><div class="dialog-card">
+    <div class="dialog-head"><h2 id="editCardTitle">Условия карты</h2><button type="button" class="close" id="closeEditCard" aria-label="Закрыть">×</button></div>
+    <form id="editRateForm" class="shot-form" hidden>
+      <label>Категория<select id="editRateCategory"></select></label>
+      <label>Новая ставка, %<input id="editRateValue" inputmode="decimal" required></label>
+      <button type="submit" class="confirm">Сохранить ставку</button>
+    </form>
+    <form id="editMonthlyForm" class="shot-form" hidden>
+      <label>Общий лимит кэшбэка за месяц, ₽<input id="editMonthlyLimit" inputmode="decimal"></label>
+      <label>Уже начислено за месяц, ₽<input id="editMonthlyUsed" inputmode="decimal"></label>
+      <p id="editCardNote">Пустое поле начислений означает, что сумма неизвестна. Запись покупки не меняет остаток.</p>
+      <button type="submit" class="confirm">Сохранить лимит</button>
+    </form>
+    <p id="editCardStatus" class="status" role="status"></p>
+  </div></dialog>
   <script>
     const $=id=>document.getElementById(id);let catalog=[],saved=[],manual=[],banks=[],categories={supermarkets:'Супермаркеты',cafe:'Кафе',fuel:'АЗС'},loading=false,authMode='register',deviceLogin=null;
     function readDevice(){try{return JSON.parse(localStorage.getItem('advisor-device')||'null')}catch{return null}}
@@ -104,12 +146,12 @@
     function setAuthMode(mode){authMode=mode;const login=mode==='login';$('authTitle').textContent=login?'Войти':'Создать кошелёк';$('authSubmit').textContent=login?'Войти':'Создать кошелёк';$('authSwitch').textContent=login?'Нет кошелька? Зарегистрироваться':'Уже есть кошелёк? Войти';$('authPassword').autocomplete=login?'current-password':'new-password';$('authError').textContent=''}
     async function checkAuth(){try{const user=await api('/api/auth/me');$('welcomeScreen').hidden=user.authenticated;$('authScreen').hidden=true;$('appScreen').hidden=!user.authenticated;if(user.authenticated){deviceLogin=user.login;const memory=readDevice();if(memory&&memory.login===user.login){catalog=memory.catalog||[];saved=memory.saved||[];manual=memory.manual||[];banks=memory.banks||[];categories=memory.categories||categories;renderCards()}load()}}catch{$('welcomeScreen').hidden=false;$('authScreen').hidden=true;$('appScreen').hidden=true}}
     $('welcomeScreen').addEventListener('start-wallet',()=>{$('welcomeScreen').hidden=true;$('authScreen').hidden=false;showRemembered()});
-    $('authSwitch').addEventListener('click',()=>setAuthMode(authMode==='login'?'register':'login'));$('authForm').addEventListener('submit',async event=>{event.preventDefault();const button=$('authSubmit');button.disabled=true;button.textContent=authMode==='login'?'Входим…':'Создаём…';$('authError').textContent='';const body={login:$('authLogin').value.trim(),password:$('authPassword').value};try{const user=await api(`/api/auth/${authMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});deviceLogin=user.login;localStorage.setItem('advisor-login',user.login);setAuthMode('register');await checkAuth()}catch(error){$('authError').textContent=error.message==='Не удалось выполнить запрос.'?'Проверьте данные и попробуйте ещё раз.':error.message}finally{button.disabled=false;button.textContent=authMode==='login'?'Войти':'Создать кошелёк'}});document.querySelectorAll('[data-section]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-section]').forEach(item=>item.classList.toggle('active',item===button));document.querySelector('.content').scrollIntoView({behavior:'smooth'});if(button.dataset.section==='compare')$('category').focus()}));
+    $('authSwitch').addEventListener('click',()=>setAuthMode(authMode==='login'?'register':'login'));$('authForm').addEventListener('submit',async event=>{event.preventDefault();const button=$('authSubmit');button.disabled=true;button.textContent=authMode==='login'?'Входим…':'Создаём…';$('authError').textContent='';const body={login:$('authLogin').value.trim(),password:$('authPassword').value};try{const user=await api(`/api/auth/${authMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});deviceLogin=user.login;localStorage.setItem('advisor-login',user.login);setAuthMode('register');await checkAuth()}catch(error){$('authError').textContent=error.message==='Не удалось выполнить запрос.'?'Проверьте данные и попробуйте ещё раз.':error.message}finally{button.disabled=false;button.textContent=authMode==='login'?'Войти':'Создать кошелёк'}});
     const money=kopecks=>new Intl.NumberFormat('ru-RU',{style:'currency',currency:'RUB',maximumFractionDigits:2}).format(kopecks/100);
     const escapeHtml=value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[character]));
     async function api(path,options={},timeout=8000){const response=await fetch(path,{...options,signal:AbortSignal.timeout(timeout)});if(!response.ok){let message=response.status===422?'Проверьте введённую сумму.':'Не удалось выполнить запрос.';try{const payload=await response.json();if(payload.message)message=payload.message}catch{}throw Object.assign(new Error(message),{status:response.status})}return response.status===204?null:response.json()}
     function formatRate(bps){const value=bps/100;return Number.isInteger(value)?String(value):String(Math.round(value*100)/100).replace('.',',')}
-    async function fillMeta(){const meta=await api('/api/meta');categories=meta.categories;banks=meta.banks;const bank=$('bankId');if(!bank.options.length)for(const item of meta.banks){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;bank.append(option)}const fresh=$('newBank');if(fresh&&!fresh.options.length)for(const item of meta.banks){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;fresh.append(option)}const select=$('category');const current=select.value;for(const [id,name] of Object.entries(meta.categories)){if(![...select.options].some(option=>option.value===id)){const option=document.createElement('option');option.value=id;option.textContent=name;select.append(option)}}select.value=current}
+    async function fillMeta(){const meta=await api('/api/meta');categories=meta.categories;catalogCategories=new Set(meta.catalogCategoryIds);banks=meta.banks;const bank=$('bankId');if(!bank.options.length)for(const item of meta.banks){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;bank.append(option)}const fresh=$('newBank');if(fresh&&!fresh.options.length)for(const item of meta.banks){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;fresh.append(option)}}
     let shotImage='';
     function imageKind(bytes){if(bytes.length>3&&bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff)return 'image/jpeg';if(bytes.length>8&&bytes[0]===0x89&&bytes[1]===0x50&&bytes[2]===0x4e&&bytes[3]===0x47)return 'image/png';if(bytes.length>12&&bytes[0]===0x52&&bytes[1]===0x49&&bytes[2]===0x46&&bytes[3]===0x46&&bytes[8]===0x57&&bytes[9]===0x45&&bytes[10]===0x42&&bytes[11]===0x50)return 'image/webp';return ''}
     async function readShot(file){const copy=file.slice(0,file.size,file.type||'application/octet-stream');let bytes;try{bytes=new Uint8Array(await copy.arrayBuffer())}catch{const url=URL.createObjectURL(copy);try{bytes=new Uint8Array(await (await fetch(url)).arrayBuffer())}finally{URL.revokeObjectURL(url)}}if(bytes.length>4000000)throw new Error('Скриншот больше 4 МБ');const kind=imageKind(bytes);if(!kind)throw new Error('Нужен снимок JPG, PNG или WebP');let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return `data:${kind};base64,${btoa(binary)}`}
@@ -123,7 +165,7 @@
     function carouselPose(distance){const sign=distance<0?-1:1;const abs=Math.min(4,Math.abs(distance));let lower=Math.floor(abs),upper=Math.min(4,lower+1),part=abs-lower;if(lower===4)part=0;const a=carouselPoses[lower],b=carouselPoses[upper];return {x:sign*(a[1]+(b[1]-a[1])*part),y:a[2]+(b[2]-a[2])*part,scale:a[3]+(b[3]-a[3])*part,rz:sign*(a[4]+(b[4]-a[4])*part),ry:sign*(a[5]+(b[5]-a[5])*part),opacity:abs>=3.9?0:abs<=3.3?1:1-(abs-3.3)/.6}}
     function carouselSlot(){const box=$('cardCarousel');return Math.max(112,Math.min(170,box.clientWidth*.39))}
     function setCarouselGlow(card){const paint=carouselCardPaint(card);$('cardCarousel').style.setProperty('--carousel-glow',paint.accent||paint.color);$('cardCarousel').style.setProperty('--bank-ink',paint.ink)}
-    function updateCarouselDetails(){const cards=carouselPos.all;if(!cards.length){$('carouselControls').hidden=true;$('carouselDetails').hidden=true;return}const index=mod(Math.round(carouselPos.value),cards.length),card=cards[index],paint=carouselCardPaint(card);setCarouselGlow(card);$('carouselControls').hidden=cards.length<2;$('carouselPosition').textContent=cards.length>1?`${index+1} / ${cards.length}`:'';const rules=card.rules||[];const summary=rules.length?rules.map(rule=>`${rule.label||categories[rule.categoryId]||rule.categoryId} ${formatRate(rule.rateBps)}%`).join(' · '):card.bankName||'Условия кешбэка добавьте со скриншота';$('carouselDetails').hidden=false;$('carouselDetails').innerHTML=`<strong>${escapeHtml(card.cardName||card.name)}</strong><small>${escapeHtml(summary)}</small>${card.kind==='manual'?`<button class="delete-active" type="button" aria-label="Удалить активную карту" data-carousel-delete="${escapeHtml(card.cardId)}">Удалить</button>`:''}`}
+    function updateCarouselDetails(){const cards=carouselPos.all;if(!cards.length){$('carouselControls').hidden=true;$('carouselDetails').hidden=true;return}const index=mod(Math.round(carouselPos.value),cards.length),card=cards[index],paint=carouselCardPaint(card);setCarouselGlow(card);$('carouselControls').hidden=cards.length<2;$('carouselPosition').textContent=cards.length>1?`${index+1} / ${cards.length}`:'';const rules=card.rules||[];const summary=rules.length?rules.map(rule=>`${rule.label||categories[rule.categoryId]||rule.categoryId} ${formatRate(rule.rateBps)}%`).join(' · '):card.bankName||'Условия кешбэка добавьте со скриншота';$('carouselDetails').hidden=false;$('carouselDetails').innerHTML=`<strong>${escapeHtml(card.cardName||card.name)}</strong><small>${escapeHtml(summary)}</small><div class="wallet-actions"><button type="button" data-carousel-edit>Условия и лимит</button>${card.kind==='manual'?`<button class="delete-active" type="button" aria-label="Удалить активную карту" data-carousel-delete="${escapeHtml(card.cardId)}">Удалить</button>`:''}</div>`}
     function renderCarousel(){const track=$('carouselTrack');track.replaceChildren();const cards=carouselPos.all;if(!cards.length){track.innerHTML='<div class="empty">Кошелёк пуст.<br>Добавьте карту, чтобы сравнивать кешбэк.</div>';updateCarouselDetails();return}carouselPos.value=mod(carouselPos.value,cards.length);carouselPos.target=carouselPos.value;carouselPos.slotPx=carouselSlot();cards.forEach((card,index)=>{const paint=carouselCardPaint(card),element=document.createElement('article');element.className='carousel-card';element.dataset.index=index;element.setAttribute('aria-label',card.cardName||card.name);element.innerHTML=`<div class="carousel-card-content"><div class="carousel-card-top"><div><div class="carousel-card-bank">${escapeHtml(card.cardName||card.name)}</div><div class="carousel-card-type">${card.kind==='manual'?'Моя карта':'Карта в кошельке'}</div></div><span class="carousel-card-logo" aria-hidden="true">${escapeHtml((card.cardName||card.name||'?').charAt(0))}</span></div><div class="carousel-card-number">•••• •••• •••• ${String(index+1).padStart(4,'0')}</div><div class="carousel-card-bottom"><span class="carousel-card-chip" aria-hidden="true"></span><strong class="carousel-card-rate">${escapeHtml((card.rules||[]).length?formatRate(Math.max(...card.rules.map(rule=>rule.rateBps)))+'%':'—')}</strong></div></div>`;track.append(element)});applyCarouselTransforms();updateCarouselDetails()}
     function applyCarouselTransforms(){const cards=carouselPos.all;if(!cards.length)return;const total=cards.length;for(const element of $('carouselTrack').children){const index=Number(element.dataset.index),raw=index-carouselPos.value;let delta=raw;while(delta>total/2)delta-=total;while(delta<-total/2)delta+=total;const pose=carouselPose(delta);element.style.transform=`translate3d(calc(-50% + ${pose.x*carouselPos.slotPx}px),${pose.y*carouselPos.slotPx}px,0) scale(${pose.scale}) rotateZ(${pose.rz}deg) rotateY(${pose.ry}deg)`;element.style.opacity=pose.opacity;element.style.zIndex=String(100-Math.round(Math.abs(delta)*10));element.style.filter=Math.abs(delta)>.35?`brightness(${1-Math.min(.16,Math.abs(delta)*.035)})`:'none'}const center=mod(Math.round(carouselPos.value),total);$('cardCarousel').setAttribute('aria-label',`Мои банковские карты. Активна: ${cards[center].cardName||cards[center].name}`);if(Math.abs(carouselPos.value-Math.round(carouselPos.value))<.001)updateCarouselDetails()}
     function cubicBezier(t){const solve=(x)=>{let u=x;for(let i=0;i<6;i++){const one=1-u;const f=3*one*one*u*.25+3*one*u*u*.2+u*u*u-x;const d=3*one*one*.25+6*one*u*(.2-.25)+3*u*u*(1-.2);if(Math.abs(d)<1e-6)break;u=Math.max(0,Math.min(1,u-f/d))}return u};const u=solve(t),one=1-u;return 3*one*one*u*.75+3*one*u*u+u*u*u}
@@ -133,68 +175,182 @@
     function carouselPointerMove(event){if(!carouselPos.down)return;const dx=event.clientX-carouselPos.startX;if(!carouselPos.locked&&Math.abs(dx)>6){carouselPos.locked=true;carouselPos.startX=event.clientX-(carouselPos.value-carouselPos.pos0)*carouselPos.slotPx;carouselPos.lastX=event.clientX;carouselPos.lastTime=performance.now();carouselPos.velocity=0;$('cardCarousel').classList.add('is-dragging')}if(!carouselPos.locked)return;const now=performance.now(),deltaX=event.clientX-carouselPos.lastX,deltaT=Math.max(1,now-carouselPos.lastTime);const sample=-deltaX/carouselPos.slotPx/deltaT;carouselPos.velocity=Math.abs(sample)<.00008?0:carouselPos.velocity*.6+sample*.4;carouselPos.lastX=event.clientX;carouselPos.lastTime=now;carouselPos.value=carouselPos.pos0-(event.clientX-carouselPos.startX)/carouselPos.slotPx;applyCarouselTransforms()}
     function carouselPointerUp(event){if(!carouselPos.down)return;carouselPos.down=false;$('cardCarousel').classList.remove('is-dragging');if(carouselPos.locked)animateCarousel(carouselPos.value,carouselPos.velocity,true);else animateCarousel(Math.round(carouselPos.value),0,false);if(event.pointerId!=null&&$('cardCarousel').hasPointerCapture(event.pointerId))$('cardCarousel').releasePointerCapture(event.pointerId)}
     function renderCards(){const all=[...saved.map(cardId=>({...cardInfo(cardId),kind:'catalog'})),...manual.map(card=>({...card,bankName:(card.rules||[]).map(rule=>`${rule.label||categories[rule.categoryId]||rule.categoryId} ${formatRate(rule.rateBps)}%`).join(', '),cardName:card.name,kind:'manual'}))];carouselPos.all=all;renderPocket();$('cardsSubtitle').textContent=all.length?`${all.length} ${all.length===1?'карта':'карты'}`:'';renderCarousel()}
-    function renderCatalog(){const list=$('catalogList');list.replaceChildren();for(const card of catalog){const button=document.createElement('button');button.className='catalog-option';button.type='button';button.setAttribute('aria-pressed',String(selected===card.cardId));button.dataset.id=card.cardId;button.innerHTML=`<span class="saved-mark" aria-hidden="true">${escapeHtml(card.cardId)}</span><span><b>${escapeHtml(card.cardName)}</b><small>${escapeHtml(card.bankName)}</small></span>`;button.addEventListener('click',()=>{selected=card.cardId;renderCatalog();$('confirmCard').disabled=false});list.append(button)}}
     async function load(){loading=true;if(!saved.length&&!manual.length)$('savedList').innerHTML='<div class="empty">Загружаем список…</div>';try{[catalog,saved,manual]=await Promise.all([api('/api/cards'),api('/api/me/cards'),api('/api/me/manual-cards')]);await fillMeta();renderCards();writeDevice()}catch(error){$('savedList').innerHTML='<div class="empty"><strong>Не удалось загрузить кошелёк</strong><span>Обновите страницу и попробуйте ещё раз.</span></div>';toast(error.message)}finally{loading=false}}
-    function openAddCard(){$('addDialog').hidden=false;$('newBank').focus()}$('openCatalog').addEventListener('click',openAddCard);
+    function openAddCard(){$('newBankSearch').value='';filterBanks();$('addDialog').hidden=false;$('newBankSearch').focus()}$('openCatalog').addEventListener('click',openAddCard);
     const carousel=$('cardCarousel');carousel.addEventListener('pointerdown',carouselPointerDown);carousel.addEventListener('pointermove',carouselPointerMove);carousel.addEventListener('pointerup',carouselPointerUp);carousel.addEventListener('pointercancel',carouselPointerUp);carousel.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'){event.preventDefault();carouselStep(-1)}if(event.key==='ArrowRight'){event.preventDefault();carouselStep(1)}});$('carouselPrev').addEventListener('click',()=>carouselStep(-1));$('carouselNext').addEventListener('click',()=>carouselStep(1));$('carouselDetails').addEventListener('click',async event=>{const button=event.target.closest('[data-carousel-delete]');if(!button)return;button.disabled=true;try{await api(`/api/me/manual-cards/${encodeURIComponent(button.dataset.carouselDelete)}`,{method:'DELETE'});toast('Карта убрана из кошелька');await load()}catch(error){toast(error.message);button.disabled=false}});
     $('savedList').addEventListener('click',async event=>{const button=event.target.closest('.remove-card');if(!button)return;button.disabled=true;try{const path=button.dataset.kind==='manual'?`/api/me/manual-cards/${encodeURIComponent(button.dataset.id)}`:`/api/me/cards/${encodeURIComponent(button.dataset.id)}`;await api(path,{method:'DELETE'});toast('Карта убрана из кошелька');await load()}catch(error){toast(error.message);button.disabled=false}});
-    $('compareForm').addEventListener('submit',async event=>{event.preventDefault();if(loading)return;const match=/^(\d+)(?:[.,](\d{1,2}))?$/.exec($('amount').value.trim());if(!match){$('status').textContent='Введите сумму в рублях, например 2500';return}const amountKopecks=Number(match[1])*100+Number((match[2]||'').padEnd(2,'0'));const button=$('calculate');button.disabled=true;button.textContent='Считаем…';$('status').textContent='Сравниваем карты…';$('results').replaceChildren();try{const data=await api('/api/recommendations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categoryId:$('category').value,amountKopecks,scope:'mine'})});$('status').textContent=data.top3.length?'Лучшие карты в вашем кошельке':'В этой категории пока нет подходящих карт';for(const [index,result] of data.top3.entries()){const item=document.createElement('article');item.className=`result ${index===0?'best':''}`;item.innerHTML=`<div class="result-head"><div><h3>${escapeHtml(result.cardName)}</h3><p>${escapeHtml(result.bankName)}</p></div><strong>${money(result.cashbackKopecks)}</strong></div><div class="tags"><span class="tag ${index===0?'good':''}">${result.rateBps/100}%</span><span class="tag">${result.limitKopecks===null?'без лимита':result.limitApplied?'лимит применён':`лимит ${money(result.limitKopecks)}`}</span></div>`;$('results').append(item)}}catch(error){$('status').textContent=error.message}finally{button.disabled=false;button.textContent='Показать лучший возврат'}});
     function applyTheme(theme){document.documentElement.dataset.theme=theme;document.documentElement.style.colorScheme=theme;localStorage.setItem('advisor-theme',theme);$('themeToggle').setAttribute('aria-pressed',String(theme==='dark'))}
     applyTheme(localStorage.getItem('advisor-theme')||'light');
     $('themeToggle').addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
-    let buyCategory='';
+    let buyCategory='', buyScope='mine';
     let buyToken=0;
     function showHome(){$('hero').hidden=false;$('content').hidden=true}
-    function showBuy(){$('hero').hidden=true;$('content').hidden=false;$('buyPanel').hidden=false;$('cardsPanel').hidden=true;$('buyAmount').focus()}
+    function showBuy(){$('hero').hidden=true;$('content').hidden=false;$('buyPanel').hidden=false;$('cardsPanel').hidden=true;paintCategories();runBuy()}
     function showCards(){$('hero').hidden=true;$('content').hidden=false;$('buyPanel').hidden=true;$('cardsPanel').hidden=false;if($('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot();applyCarouselTransforms()}}
     $('openBuy').addEventListener('click',showBuy);
     $('openCards').addEventListener('click',showCards);
     $('buyBack').addEventListener('click',showHome);
     $('cardsBack').addEventListener('click',showHome);
-    function paintCategories(){const grid=$('categoryGrid');grid.replaceChildren();const available={...categories};for(const card of manual)for(const rule of card.rules||[]){if(rule.categoryId&&!available[rule.categoryId])available[rule.categoryId]=rule.label||rule.categoryId}if(!Object.hasOwn(available,buyCategory))buyCategory='';for(const [id,name] of Object.entries(available)){const button=document.createElement('button');button.type='button';button.dataset.id=id;button.setAttribute('aria-pressed',String(buyCategory===id));button.innerHTML=`<span class="category-mark">${escapeHtml(name.charAt(0))}</span><span>${escapeHtml(name)}</span>`;button.addEventListener('click',()=>{buyCategory=id;for(const item of grid.children)item.setAttribute('aria-pressed',String(item===button));runBuy()});grid.append(button)}}
+    function paintCategories(){const grid=$('categoryGrid');grid.replaceChildren();const available={...categories};if(buyScope==='all'){for(const key of Object.keys(available))if(!catalogCategories.has(key))delete available[key]}else for(const card of manual)for(const rule of card.rules||[]){if(rule.categoryId&&!available[rule.categoryId])available[rule.categoryId]=rule.label||rule.categoryId}if(!Object.hasOwn(available,buyCategory))buyCategory='';for(const [id,name] of Object.entries(available)){const button=document.createElement('button');button.type='button';button.dataset.id=id;button.setAttribute('aria-pressed',String(buyCategory===id));button.innerHTML=`<span class="category-mark">${escapeHtml(name.charAt(0))}</span><span>${escapeHtml(name)}</span>`;button.addEventListener('click',()=>{buyCategory=id;for(const item of grid.children)item.setAttribute('aria-pressed',String(item===button));renderPurchaseCatalog();runBuy()});grid.append(button)}}
+    let catalogCategories=new Set(Object.keys(categories));
+    function setBuyScope(scope) {
+      buyScope=scope;
+      $('buyMine').setAttribute('aria-pressed',String(scope==='mine'));
+      $('buyAll').setAttribute('aria-pressed',String(scope==='all'));
+      $('purchaseOrigin').hidden=$('purchaseCatalog').hidden=scope!=='all';
+      paintCategories();renderPurchaseCatalog();runBuy();
+    }
+    $('buyMine').onclick=()=>setBuyScope('mine');
+    $('buyAll').onclick=()=>setBuyScope('all');
+
+    function ruleTerms(rule) {
+      const period=rule.validUntilExclusive?`${rule.validFrom} — до ${rule.validUntilExclusive}`:rule.validFrom;
+      return [
+        `Ставка: ${formatRate(rule.rateBps)} %`,
+        rule.limitKopecks===null?'Лимит по условию не указан':`Лимит по условию: ${money(rule.limitKopecks)}`,
+        ...(rule.minAmountKopecks>1?[`Покупка от ${money(rule.minAmountKopecks)}`]:[]),
+        `Действует с ${period}. Сведения от ${rule.updatedOn}`
+      ];
+    }
+    function termList(terms) { return `<ul>${terms.map(term=>`<li>${escapeHtml(term)}</li>`).join('')}</ul>`; }
+
+    async function toggleCatalogCard(card, button) {
+      const adding=!saved.includes(card.cardId);
+      button.disabled=true;
+      try {
+        await api(`/api/me/cards/${encodeURIComponent(card.cardId)}`,{method:adding?'PUT':'DELETE'});
+        await load();
+        toast(adding?'Карта добавлена в кошелёк':'Карта убрана из кошелька');
+      } catch(error) { toast(error.message); }
+      finally { button.disabled=false; }
+    }
+    function renderPurchaseCatalog() {
+      const host=$('catalogCards');
+      host.replaceChildren();
+      if (buyScope!=='all') return;
+      for (const card of catalog) {
+        const rules=card.rules.filter(rule=>!buyCategory||[buyCategory,'all'].includes(rule.categoryId));
+        if (!rules.length) continue;
+        const item=document.createElement('article');item.className='catalog-card';
+        item.innerHTML=`<strong>${escapeHtml(card.cardName)}</strong> · ${escapeHtml(card.bankName)}${rules.map(rule=>`<details><summary>${escapeHtml(categories[rule.categoryId]||rule.categoryId)}</summary>${termList(ruleTerms(rule))}</details>`).join('')}<button type="button">${saved.includes(card.cardId)?'Убрать из кошелька':'Добавить в кошелёк'}</button>`;
+        const button=item.querySelector('button');
+        button.onclick=()=>toggleCatalogCard(card,button);
+        host.append(item);
+      }
+      if (!host.childElementCount) host.textContent=loading?'Загружаем каталог…':'В этой категории нет действующих условий';
+    }
+
+    function makePurchaseCard(item, index, own, total) {
+      const card=document.createElement('article');card.className='purchase-card saved-card';
+      const calc=item.calculation;
+      const terms=[...ruleTerms(item),`По ставке: ${money(calc.beforeLimitsKopecks)}`];
+      if (calc.beforeLimitsKopecks!==calc.afterCategoryLimitKopecks) terms.push(`После лимита по условию: ${money(calc.afterCategoryLimitKopecks)}`);
+      if (calc.monthlyRemainingKopecks!==null) terms.push(`Остаток месяца: ${money(calc.monthlyRemainingKopecks)}${calc.monthlyUsageKnown?'':' · начисления не указаны'}`);
+      terms.push(`Ожидаемый кэшбэк: ${money(item.cashbackKopecks)}`);
+      card.innerHTML=`<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index===0&&total>1?'Лучшая · ':''}${escapeHtml(money(item.cashbackKopecks))}</small><details><summary>Условия</summary>${termList(terms)}</details></div>${own?'<button class="pick" type="button">Выбрать</button>':''}`;
+      if (own) card.querySelector('button').onclick=()=>lockPurchase(item.cardId);
+      if (item.bankAccess) {
+        const link=document.createElement('a');link.className='bank-result-link';link.href=item.bankAccess.webUrl;
+        link.target='_blank';link.rel='noopener noreferrer';link.textContent='Веб-кабинет банка';
+        link.setAttribute('aria-label',`Открыть веб-кабинет: ${item.bankAccess.name}`);card.querySelector('.saved-info').append(link);
+      }
+      return card;
+    }
     function kopecksOf(value){const text=value.replace(/\s/g,'').replace(',','.');return /^\d+(\.\d{1,2})?$/.test(text)?Math.round(Number(text)*100):0}
     async function runBuy() {
       const token = ++buyToken;
       const amount = kopecksOf($('buyAmount').value);
       $('buyResults').replaceChildren();
+      $('otherBuyResults').replaceChildren();
+      $('buyRankingTitle').hidden=$('allBuyResults').hidden=true;
       if (!buyCategory || !amount) {
-        $('buyStatus').textContent = buyCategory ? '' : 'Выберите категорию';
+        $('buyStatus').textContent = !buyCategory?'Выберите категорию':$('buyAmount').value?'Введите сумму больше нуля, до двух знаков после запятой':'';
         return;
       }
       $('buyStatus').textContent = 'Считаем…';
       try {
         const data = await api('/api/recommendations', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({categoryId: buyCategory, amountKopecks: amount, scope: 'mine'})
+          body: JSON.stringify({categoryId: buyCategory, amountKopecks: amount, scope: buyScope})
         });
         if (token !== buyToken) return;
-        $('buyStatus').textContent = data.allMatches.length ? '' : 'В этой категории кэшбэка нет';
-        data.allMatches.forEach((item, index) => {
-          const card = document.createElement('article');
-          card.className = 'saved-card';
-          card.innerHTML = `<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index ? '' : 'Лучшая · '}${escapeHtml(money(item.cashbackKopecks))}</small></div><button class="pick" type="button">Выбрать</button>`;
-          if (item.bankAccess) {
-            const link = document.createElement('a');
-            link.className = 'bank-result-link';
-            link.href = item.bankAccess.webUrl;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            link.textContent = 'Веб-кабинет банка';
-            link.setAttribute('aria-label', `Открыть веб-кабинет: ${item.bankAccess.name}`);
-            card.querySelector('.saved-info').append(link);
-          }
-          card.querySelector('button').addEventListener('click', () => lockPurchase(item.cardId));
-          $('buyResults').append(card);
-        });
+        $('buyStatus').textContent=data.top3.length?'':buyScope==='mine'?'У ваших карт нет подходящих условий. Сравните весь каталог.':'В каталоге нет подходящих условий';
+        $('buyRankingTitle').hidden=!data.top3.length;
+        $('allBuyResults').hidden=data.allMatches.length<=data.top3.length;
+        const row=(item,index)=>makePurchaseCard(item,index,buyScope==='mine',data.allMatches.length);
+        $('buyResults').append(...data.top3.map(row));
+        $('otherBuyResults').append(...data.allMatches.slice(data.top3.length).map((item,index)=>row(item,index+3)));
       } catch (error) {
-        if (token === buyToken) $('buyStatus').textContent = error.message;
+        if (token === buyToken) $('buyStatus').textContent = error.status===422?'Проверьте категорию и сумму':'Не удалось получить расчёт. Измените сумму или выберите категорию ещё раз.';
       }
     }
     let buyTimer=0;
-    $('buyAmount').addEventListener('input',()=>{++buyToken;$('buyResults').replaceChildren();clearTimeout(buyTimer);buyTimer=setTimeout(runBuy,80)});
+    $('buyAmount').addEventListener('input',()=>{++buyToken;$('buyResults').replaceChildren();$('otherBuyResults').replaceChildren();$('buyRankingTitle').hidden=$('allBuyResults').hidden=true;clearTimeout(buyTimer);buyTimer=setTimeout(runBuy,80)});
+    const editDialog=$('editCardDialog');
+    let editedCard=null;
+    function updateRateInput() {
+      const rule=editedCard.rules[$('editRateCategory').value];
+      $('editRateValue').value=rule?formatRate(rule.rateBps):'';
+    }
+    $('carouselDetails').addEventListener('click',async event=>{
+      if (!event.target.closest('[data-carousel-edit]')) return;
+      const card=carouselPos.all[mod(Math.round(carouselPos.value),carouselPos.all.length)];
+      if (!card) return;
+      editedCard=card;
+      $('editCardTitle').textContent=card.cardName||card.name;
+      $('editCardStatus').textContent='Загружаем лимит…';
+      $('editMonthlyForm').hidden=true;
+      $('editRateForm').hidden=card.kind!=='manual'||!card.rules.length;
+      if (!$('editRateForm').hidden) {
+        const selector=$('editRateCategory');
+        selector.replaceChildren(...card.rules.map((rule,index)=>new Option(rule.label||categories[rule.categoryId]||rule.categoryId,index)));
+        updateRateInput();
+      }
+      editDialog.showModal();
+      try {
+        const data=await api(`/api/me/cards/${encodeURIComponent(card.cardId)}/monthly`);
+        if (editedCard!==card||!editDialog.open) return;
+        $('editMonthlyLimit').value=data.limitKopecks===null?'':formatRate(data.limitKopecks);
+        $('editMonthlyUsed').value=data.usedKopecks===null?'':formatRate(data.usedKopecks);
+        $('editMonthlyForm').hidden=false;
+        $('editCardStatus').textContent=data.remainingKopecks===null?'':`Для расчёта доступно ${money(data.remainingKopecks)} · ${data.month}`;
+      } catch(error) { if (editedCard===card) $('editCardStatus').textContent=error.message; }
+    });
+    $('closeEditCard').onclick=()=>editDialog.close();
+    $('editRateCategory').onchange=updateRateInput;
+    function editNumber(field, optional=false) {
+      const raw=$(field).value.trim();
+      if (optional&&!raw) return null;
+      if (!/^\d{1,11}([.,]\d{1,2})?$/.test(raw)) throw new Error('Введите число с точностью до двух знаков.');
+      return kopecksOf(raw);
+    }
+    for (const [form, url, method, payload] of [
+      ['editRateForm',card=>`/api/me/manual-cards/${card}/rate`,'PATCH',()=>{
+        const rule=editedCard.rules[$('editRateCategory').value];
+        return {categoryId:rule.categoryId,label:rule.label||null,rateBps:editNumber('editRateValue')};
+      }],
+      ['editMonthlyForm',card=>`/api/me/cards/${card}/monthly`,'PUT',()=>({limitKopecks:editNumber('editMonthlyLimit',true),usedKopecks:editNumber('editMonthlyUsed',true)})]
+    ]) {
+      $(form).onsubmit=async event=>{
+        event.preventDefault();
+        const button=event.submitter;
+        button.disabled=true;
+        try {
+          await api(url(encodeURIComponent(editedCard.cardId)),{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});
+          editDialog.close();await load();toast('Условия сохранены');
+        } catch(error) { $('editCardStatus').textContent=error.message; }
+        finally { button.disabled=false; }
+      };
+    }
     let purchasePending=false,purchaseAttempt=null;
-    async function lockPurchase(cardId){const amount=kopecksOf($('buyAmount').value);if(purchasePending||!buyCategory||!amount)return;const body={categoryId:buyCategory,amountKopecks:amount,chosenCardId:cardId};const signature=JSON.stringify(body);if(purchaseAttempt?.signature!==signature)purchaseAttempt={signature,id:Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('')};purchasePending=true;$('buyPanel').inert=true;try{const saved=await api('/api/me/purchases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,requestId:purchaseAttempt.id})});purchaseAttempt=null;toast(`Записано ${money(saved.calculatedKopecks)}`);$('buyAmount').value='';$('buyResults').replaceChildren();$('buyStatus').textContent='Покупка записана'}catch(error){toast(error.message)}finally{purchasePending=false;$('buyPanel').inert=false}}
-    function fillCashbackCards(){const select=$('cashbackCard');const current=select.value;select.replaceChildren(new Option('Новая карта',''));for(const card of manual)select.append(new Option(card.name,card.cardId));select.value=[...select.options].some(option=>option.value===current)?current:''}
+    async function lockPurchase(cardId){const amount=kopecksOf($('buyAmount').value);if(purchasePending||!buyCategory||!amount)return;const body={categoryId:buyCategory,amountKopecks:amount,chosenCardId:cardId};const signature=JSON.stringify(body);if(purchaseAttempt?.signature!==signature)purchaseAttempt={signature,id:Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('')};purchasePending=true;$('buyPanel').inert=true;try{const saved=await api('/api/me/purchases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,requestId:purchaseAttempt.id})});purchaseAttempt=null;toast(`Записано ${money(saved.calculatedKopecks)}`);$('buyAmount').value='';$('buyResults').replaceChildren();$('otherBuyResults').replaceChildren();$('buyRankingTitle').hidden=$('allBuyResults').hidden=true;$('buyStatus').textContent='Покупка записана'}catch(error){toast(error.message)}finally{purchasePending=false;$('buyPanel').inert=false}}
+    function filterBanks() {
+      const query=$('newBankSearch').value.trim().toLocaleLowerCase('ru');
+      const matching=banks.filter(bank=>[bank.name,bank.registrationNumber].some(value=>value?.toLocaleLowerCase('ru').includes(query)));
+      $('newBank').replaceChildren(...matching.map(bank=>new Option(bank.name,bank.id)));
+      if (!matching.length) $('newBank').append(new Option('Банк не найден',''));
+    }
+    $('newBankSearch').oninput=filterBanks;
     $('addCardBtn').addEventListener('click',openAddCard);
     $('closeAdd').addEventListener('click',()=>{$('addDialog').hidden=true});
     $('addDialog').addEventListener('click',event=>{if(event.target===$('addDialog'))$('addDialog').hidden=true});
@@ -209,7 +365,7 @@
     $('settingsDialog').addEventListener('click',event=>{if(event.target===$('settingsDialog'))$('settingsDialog').hidden=true});
     $('usualCard').addEventListener('change',async()=>{if(!$('usualCard').value)return;try{await api('/api/me/usual-card',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cardId:$('usualCard').value})});toast('Обычная карта сохранена')}catch(error){toast(error.message)}});
     const originalLoad=load;
-    load=async function(){await originalLoad();paintCategories();document.dispatchEvent(new Event('wallet-updated'))};
+    load=async function(){await originalLoad();paintCategories();renderPurchaseCatalog();document.dispatchEvent(new Event('wallet-updated'))};
     for (const [name, read, write] of [['$',()=>$,null],['banks',()=>banks,value=>{banks=value}],['manual',()=>manual,value=>{manual=value}],['categories',()=>categories,value=>{categories=value}],['deviceLogin',()=>deviceLogin,value=>{deviceLogin=value}],['carouselPos',()=>carouselPos,null]]) Object.defineProperty(window,name,{get:read,set:write||(()=>{}),configurable:true});
     checkAuth();
   </script>

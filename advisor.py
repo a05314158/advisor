@@ -9,6 +9,7 @@ from time import monotonic
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
+from threading import Lock
 
 import httpx
 import cashback_sets as monthly
@@ -18,13 +19,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from bank_links import bank_access
 from cashback_planner import mount_planner
 from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows, wallet_purchase_table
+from observability import mount_observability
 PAGE = Path(__file__).with_name('wallet.html')
 SCRIPT = Path(__file__).with_name('wallet-cashback.js')
 BUILD_REVISION = '$Format:%H$'
 
 
 
-def recommend(category: str, amount: int, day: date, rules=None, own=None) -> dict:
+def recommend(category: str, amount: int, day: date, rules=None, own=None, monthly_caps=None) -> dict:
     rules = SEED if rules is None else rules
     today = day.isoformat()
     winners = {}
@@ -35,11 +37,17 @@ def recommend(category: str, amount: int, day: date, rules=None, own=None) -> di
             continue
         raw = (amount * rule['rateBps'] + 5000) // 10000
         cap = rule['limitKopecks']
-        value = raw if cap is None else min(raw, cap)
-        priority = (rule['categoryId'] == category, value)
+        after_rule = raw if cap is None else min(raw, cap)
+        monthly_cap, used = (monthly_caps or {}).get(card, (None, None))
+        remaining = None if monthly_cap is None else max(0, monthly_cap - (used or 0))
+        value = after_rule if remaining is None else min(after_rule, remaining)
+        priority = (rule['categoryId'] == category, value, after_rule, rule['rateBps'], rule.get('label') or '')
         if card not in winners or priority > winners[card][0]:
             winners[card] = priority, {**card_info(card), **rule, 'cashbackKopecks': value,
-                                      'limitApplied': cap is not None and raw > cap}
+                                      'limitApplied': value < raw,
+                                      'calculation': dict(beforeLimitsKopecks=raw, afterCategoryLimitKopecks=after_rule,
+                                                          monthlyRemainingKopecks=remaining,
+                                                          monthlyUsageKnown=used is not None)}
     matches = sorted((r for _, r in winners.values()), key=lambda x: (-x['cashbackKopecks'], x['cardId']))
     def canonical(items):
         return sorted(items, key=lambda r: (r['cardId'], r['categoryId'], r['validFrom']))
@@ -188,10 +196,22 @@ SHOT_WINDOW = 3600
 SHOT_LIMIT = 8
 GLOBAL_SHOTS = []
 GLOBAL_LIMIT = 30
+SHOT_LOCK = Lock()
 
 
 def allow_screenshot(session):
-    return True
+    now = monotonic()
+    with SHOT_LOCK:
+        GLOBAL_SHOTS[:] = [stamp for stamp in GLOBAL_SHOTS if now - stamp < SHOT_WINDOW]
+        for key in list(SHOTS):
+            if now - SHOTS[key][-1] >= SHOT_WINDOW:
+                del SHOTS[key]
+        recent = [stamp for stamp in SHOTS.get(session, ()) if now - stamp < SHOT_WINDOW]
+        if len(GLOBAL_SHOTS) >= GLOBAL_LIMIT or len(recent) >= SHOT_LIMIT:
+            return False
+        SHOTS[session] = [*recent, now]
+        GLOBAL_SHOTS.append(now)
+        return True
 
 
 def session_id(request):
@@ -207,17 +227,13 @@ def create_app(db_path):
 
     app = FastAPI(title='Советник', lifespan=lifespan)
 
-    @app.middleware('http')
-    async def no_api_cache(request, call_next):
-        response = await call_next(request)
-        if request.url.path.startswith('/api/'):
-            response.headers['Cache-Control'] = 'no-store'
-        return response
+    mount_observability(app)
 
     @app.get('/')
     def home():
         return FileResponse(PAGE)
 
+    @app.get('/android-bank-test', include_in_schema=False)
     @app.get('/bank-link-test', include_in_schema=False)
     def bank_link_test():
         return FileResponse(PAGE.with_name('bank-link-test.html'))
@@ -299,11 +315,12 @@ def create_app(db_path):
             return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
         today = datetime.now(UTC).date().isoformat()
         with connect(db_path) as db:
+            names = catalog_names(db)
             result = {}
             for rule in rows(db):
                 card = rule['cardId']
-                if categoryId is None or (rule['categoryId'] == categoryId and active(rule, today)):
-                    result.setdefault(card, dict(**card_info(card), rules=[]))
+                if categoryId is None or (rule['categoryId'] in (categoryId, 'all') and active(rule, today)):
+                    result.setdefault(card, dict(**names.get(card, card_info(card)), rules=[]))
                     if active(rule, today):
                         result[card]['rules'].append(rule)
         return list(result.values())
@@ -313,9 +330,14 @@ def create_app(db_path):
         today = datetime.now(UTC).date().isoformat()
         with connect(db_path) as db:
             rules = [r for r in rows(db) if r['cardId'] == card]
+            info = catalog_names(db).get(card, card_info(card))
         if not rules:
             return JSONResponse({'code': 'unknown_card'}, 404)
-        return dict(**card_info(card), rules=[r for r in rules if active(r, today)])
+        return dict(**info, rules=[r for r in rules if active(r, today)])
+
+    def catalog_names(db):
+        return {card: dict(cardId=card, bankName=bank, cardName=name)
+                for card, bank, name in db.execute('SELECT id, bank_name, name FROM catalog_cards')}
 
     def saved(db, request):
         return [row[0] for row in db.execute('SELECT cardId FROM saved WHERE session = ? ORDER BY cardId',
@@ -400,13 +422,13 @@ def create_app(db_path):
                     for rule in json.loads(payload):
                         if rule.get('selected') is True and rule.get('categoryId') not in categories:
                             categories[rule['categoryId']] = rule.get('label') or rule['categoryId']
-        return {'banks': bank_public(), 'categories': categories}
+        return {'banks': bank_public(), 'categories': categories, 'catalogCategoryIds': list(CATEGORIES)}
 
     @app.post('/api/me/cashback-screenshot', status_code=201)
     def cashback_screenshot(body: dict, request: Request):
         bank_id, image = body.get('bankId'), body.get('image')
         banks = bank_names()
-        if bank_id not in banks:
+        if not isinstance(bank_id, str) or bank_id not in banks:
             return JSONResponse({'message': 'Выберите банк из списка'}, 422)
         try:
             image = decode_image(image)
@@ -448,6 +470,7 @@ def create_app(db_path):
             return JSONResponse({'message': 'Войдите, чтобы сохранить категории'}, 401)
         try:
             with connect(db_path) as db:
+                db.execute('BEGIN IMMEDIATE')
                 return monthly.confirm(db, session, body, datetime.now(UTC).date().isoformat())
         except monthly.Invalid as error:
             return JSONResponse({'message': str(error)}, error.status)
@@ -478,6 +501,75 @@ def create_app(db_path):
             db.execute('DELETE FROM saved WHERE session = ? AND cardId = ?', (session_id(request), card))
         return Response(status_code=204)
 
+    def personal_caps(db, session, month):
+        return {card: (cap, used) for card, cap, used in db.execute('''
+            SELECT l.card_id, l.limit_kopecks, u.used_kopecks FROM wallet_monthly_limits l
+            LEFT JOIN wallet_monthly_usage u ON u.session=l.session AND u.card_id=l.card_id AND u.month=?
+            WHERE l.session=?''', (month, session))}
+
+    @app.get('/api/me/cards/{card}/monthly')
+    def get_monthly_settings(card: str, request: Request):
+        return monthly_settings(card, request)
+
+    @app.put('/api/me/cards/{card}/monthly')
+    def put_monthly_settings(card: str, body: dict, request: Request):
+        return monthly_settings(card, request, body)
+
+    def monthly_settings(card, request, body=None):
+        session = require_user(request)
+        if not session:
+            return JSONResponse({'message': 'Войдите в кошелёк'}, 401)
+        month = datetime.now(UTC).strftime('%Y-%m')
+        with connect(db_path) as db:
+            db.execute('BEGIN IMMEDIATE' if request.method == 'PUT' else 'BEGIN')
+            owner = db.execute('''SELECT 1 FROM manual_cards WHERE session=? AND card_id=?
+                UNION SELECT 1 FROM saved WHERE session=? AND cardId=?''', (session, card, session, card)).fetchone()
+            if not owner:
+                return JSONResponse({'message': 'Карта не найдена'}, 404)
+            cap, used = personal_caps(db, session, month).get(card, (None, None))
+            if request.method == 'PUT':
+                if body is None or not {'limitKopecks', 'usedKopecks'} <= body.keys():
+                    return JSONResponse({'message': 'Укажите лимит и начисления'}, 422)
+                cap, used = body['limitKopecks'], body['usedKopecks']
+                if any(value is not None and (type(value) is not int or not 0 <= value <= 10**12)
+                       for value in (cap, used)):
+                    return JSONResponse({'message': 'Проверьте суммы в рублях'}, 422)
+                db.execute('INSERT OR REPLACE INTO wallet_monthly_limits VALUES (?, ?, ?)', (session, card, cap))
+                db.execute('INSERT OR REPLACE INTO wallet_monthly_usage VALUES (?, ?, ?, ?)', (session, card, month, used))
+            return dict(month=month, limitKopecks=cap, usedKopecks=used,
+                        remainingKopecks=None if cap is None else max(0, cap - (used or 0)))
+
+    @app.patch('/api/me/manual-cards/{card}/rate', status_code=204)
+    def update_rate(card: str, body: dict, request: Request):
+        session = require_user(request)
+        if not session:
+            return JSONResponse({'message': 'Войдите в кошелёк'}, 401)
+        category, label, rate = body.get('categoryId'), body.get('label'), body.get('rateBps')
+        if (not isinstance(category, str) or not category or (label is not None and not isinstance(label, str))
+                or type(rate) is not int or not 0 <= rate <= 10000):
+            return JSONResponse({'message': 'Укажите ставку от 0 до 100 %'}, 422)
+        month = datetime.now(UTC).strftime('%Y-%m')
+        with connect(db_path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT rules_json FROM manual_cards WHERE session=? AND card_id=?', (session, card)).fetchone()
+            if not row:
+                return JSONResponse({'message': 'Карта не найдена'}, 404)
+            if label is None:
+                table, fields = 'manual_cards', (session, card)
+                condition = 'session=? AND card_id=?'
+            else:
+                table, fields = 'cashback_sets', (session, card, month)
+                condition = "session=? AND card_id=? AND month=? AND mode='active'"
+                row = db.execute(f'SELECT rules_json FROM {table} WHERE {condition}', fields).fetchone()
+            rules = json.loads(row[0]) if row else []
+            matches = [rule for rule in rules if rule['categoryId'] == category and rule.get('label') == label
+                       and (label is None or rule.get('selected') is True)]
+            if len(matches) != 1:
+                return JSONResponse({'message': 'Активная ставка не найдена или неоднозначна'}, 409 if matches else 404)
+            matches[0]['rateBps'] = rate
+            db.execute(f'UPDATE {table} SET rules_json=? WHERE {condition}', (json.dumps(rules), *fields))
+        return Response(status_code=204)
+
     @app.post('/api/recommendations')
     def recommendations(body: dict, request: Request):
         category, amount, scope = body.get('categoryId'), body.get('amountKopecks'), body.get('scope')
@@ -487,17 +579,20 @@ def create_app(db_path):
             return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
         if scope not in ('all', 'mine'):
             return JSONResponse({'field': 'scope', 'code': 'unknown_scope'}, 422)
+        today = datetime.now(UTC).date()
         with connect(db_path) as db:
             db.execute('BEGIN')
-            rules, own = owned_rules(db, request)
-            known = CATEGORIES if scope != 'mine' else CATEGORIES.keys() | {rule['categoryId'] for rule in rules}
+            rules, own = owned_rules(db, request) if scope == 'mine' else (rows(db), None)
+            known = CATEGORIES if own is None else CATEGORIES.keys() | {rule['categoryId'] for rule in rules}
             if category not in known:
                 return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
-            if scope != 'mine':
-                rules, own = rows(db), None
-        result = recommend(category, amount, datetime.now(UTC).date(), rules, own)
-        if scope == 'mine':
-            for item in result['allMatches']:
+            names = catalog_names(db)
+            caps = personal_caps(db, session_id(request), today.strftime('%Y-%m')) if own is not None else None
+        result = recommend(category, amount, today, rules, own, caps)
+        for item in result['allMatches']:
+            if item['cardId'] in names:
+                item.update(names[item['cardId']])
+            if own is not None:
                 access = bank_access(item['bankName'])
                 if access:
                     item['bankAccess'] = access
@@ -557,13 +652,14 @@ def create_app(db_path):
         request_key = body.get('requestId')
         try:
             with connect(db_path) as db:
+                db.execute('BEGIN IMMEDIATE')
                 digest = replay = None
                 if request_key is not None:
                     digest, replay = monthly.previous(db, session, 'purchase', request_key, [category, amount, chosen])
                 if replay:
                     return JSONResponse(replay, 201)
                 rules, own = owned_rules(db, request)
-                result = recommend(category, amount, today, rules, own)
+                result = recommend(category, amount, today, rules, own, personal_caps(db, session, today.strftime('%Y-%m')))
                 picked = next((item for item in result['allMatches'] if item['cardId'] == chosen), None)
                 if not picked:
                     return JSONResponse({'message': 'Эта карта не даёт кэшбэк в выбранной категории'}, 422)

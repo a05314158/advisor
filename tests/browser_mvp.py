@@ -1,7 +1,6 @@
 """Run the redesigned wallet purchase flow in Chromium."""
 import argparse
 import re
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from playwright.sync_api import expect, sync_playwright
@@ -19,33 +18,62 @@ def check(base, chromium=None):
         page.locator('#authPassword').fill(uuid4().hex)
         page.locator('#authSubmit').click()
         expect(page.locator('#openBuy')).to_be_visible()
+        page.locator('#openBuy').click()
+        page.locator('#buyAll').click()
+        page.locator('#categoryGrid button[data-id="supermarkets"]').click()
+        page.locator('#buyAmount').fill('2500')
+        results = page.locator('#buyResults article')
+        expect(results.locator('strong')).to_have_text(['Карта B', 'Карта A', 'Карта C'])
+        results.nth(1).get_by_text('Условия', exact=True).click()
+        expect(results.nth(1)).to_contain_text('После лимита по условию')
+        expect(results.nth(1)).to_contain_text('Сведения от')
+        page.get_by_text('Все подходящие карты', exact=True).click()
+        expect(page.locator('#otherBuyResults')).to_contain_text('Карта D')
+        page.locator('#categoryGrid button[data-id="cafe"]').click()
+        expect(results.locator('strong')).to_have_text(['Карта D'])
+        page.get_by_text('Карты и условия каталога', exact=True).click()
+        expect(page.locator('#catalogCards article')).to_have_count(1)
+        page.get_by_role('button', name='Добавить в кошелёк').click()
+        expect(page.get_by_role('button', name='Убрать из кошелька')).to_be_visible()
+        page.locator('#buyBack').click()
+        page.locator('#openCards').click()
+
+        # Create a manual card and its active rule through the real mobile UI.
+        page.locator('#addCardBtn').click()
+        page.locator('#newBankSearch').fill('Т-Банк')
+        page.locator('#newBank').select_option('tbank')
+        page.locator('#addCardForm button[type="submit"]').click()
+        expect(page.locator('#carouselTrack')).to_contain_text('Т-Банк')
+        page.locator('#addCashbackBtn').click()
+        page.locator('#bankId').select_option('tbank')
+        page.locator('#manualDraft').click()
+        page.locator('#reviewRows [data-key="label"]').fill('Супермаркеты')
+        page.locator('#reviewRows [data-key="rateBps"]').fill('10')
+        page.locator('#reviewRows [data-key="limitKopecks"]').fill('120')
+        page.locator('#saveReview').click()
+        expect(page.locator('#catalogDialog')).to_be_hidden()
+        page.locator('#carouselNext').click()
+        expect(page.locator('#carouselDetails')).to_contain_text('Супермаркеты 10%')
+        page.get_by_role('button', name='Условия и лимит').click()
+        page.locator('#editMonthlyLimit').fill('500')
+        page.locator('#editMonthlyUsed').fill('410')
+        page.get_by_role('button', name='Сохранить лимит').click()
+        expect(page.locator('#editCardDialog')).to_be_hidden()
 
         # Populate the wallet without requiring live screenshot recognition.
-        for name, rate in [('ВТБ', 400), ('Моя карта', 200)]:
+        for name, rate in [('ВТБ', 300), ('Моя карта', 100)]:
             response = page.request.post(base + '/api/me/manual-cards', data={
                 'name': name,
                 'rules': [{'categoryId': 'supermarkets', 'rateBps': rate, 'limitKopecks': None}],
             })
             assert response.status == 201, response.text()
-        response = page.request.post(base + '/api/me/cashback-confirm', data={
-            'bankId': 'tbank',
-            'month': datetime.now(UTC).strftime('%Y-%m'),
-            'mode': 'active',
-            'slots': None,
-            'requestId': uuid4().hex,
-            'rules': [{
-                'label': 'Супермаркеты', 'categoryId': 'supermarkets', 'rateBps': 1000,
-                'limitKopecks': 12_000, 'minAmountKopecks': 1, 'selected': True, 'uncertain': False,
-            }],
-        })
-        assert response.ok, response.text()
         page.reload()
         page.locator('#openBuy').click()
         page.locator('#categoryGrid button[data-id="supermarkets"]').click()
         page.locator('#buyAmount').fill('2500')
         results = page.locator('#buyResults article')
-        expect(results.locator('strong')).to_have_text(['Т-Банк', 'ВТБ', 'Моя карта'])
-        expect(results.first).to_contain_text(re.compile(r'120(?:,00)?\s*₽'))
+        expect(results.locator('strong')).to_have_text(['Т-Банк', 'ВТБ', 'Карта D'])
+        expect(results.first).to_contain_text(re.compile(r'90(?:,00)?\s*₽'))
         first_link = results.first.get_by_role('link', name=re.compile('Открыть веб-кабинет'))
         expect(first_link).to_have_attribute('href', 'https://www.tbank.ru/login/')
         expect(results.nth(1).get_by_role('link')).to_have_attribute('href', 'https://online.vtb.ru/')
@@ -60,12 +88,28 @@ def check(base, chromium=None):
         opened.value.close()
         assert page.request.get(base + '/api/me/stats').json()['count'] == 0
 
-        results.first.get_by_role('button', name='Выбрать').click()
+        page.locator('#buyBack').click()
+        page.locator('#openCards').click()
+        page.locator('#carouselNext').click()
+        expect(page.locator('#carouselDetails')).to_contain_text('Супермаркеты 10%')
+        page.get_by_role('button', name='Условия и лимит').click()
+        page.locator('#editRateValue').fill('2')
+        page.get_by_role('button', name='Сохранить ставку').click()
+        expect(page.locator('#carouselDetails')).to_contain_text('Супермаркеты 2%')
+        page.reload()
+        page.locator('#openBuy').click()
+        page.locator('#categoryGrid button[data-id="supermarkets"]').click()
+        page.locator('#buyAmount').fill('2500')
+        expect(results.locator('strong')).to_have_text(['ВТБ', 'Карта D', 'Т-Банк'])
+        bank_card = results.filter(has_text='Т-Банк')
+        bank_card.get_by_text('Условия', exact=True).click()
+        expect(bank_card).to_contain_text(re.compile(r'Остаток месяца: 90(?:,00)?\s*₽'))
+        bank_card.get_by_role('button', name='Выбрать').click()
         expect(page.locator('#buyStatus')).to_have_text('Покупка записана')
         page.reload()
         expect(page.locator('#openBuy')).to_be_visible()
         stats = page.request.get(base + '/api/me/stats').json()
-        assert stats['count'] == 1 and stats['calculatedKopecks'] == 12_000, stats
+        assert stats['count'] == 1 and stats['calculatedKopecks'] == 5_000, stats
         assert not errors, errors
         browser.close()
 
