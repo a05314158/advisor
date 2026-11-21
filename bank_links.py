@@ -3,10 +3,14 @@ from unicodedata import normalize
 
 
 BANK_ACCESS = {
+    'sber': {'id': 'sber', 'name': 'СберБанк Онлайн', 'webUrl': 'https://online.sberbank.ru/'},
+    'vtb': {'id': 'vtb', 'name': 'ВТБ Онлайн', 'webUrl': 'https://online.vtb.ru/'},
     'tbank': {'id': 'tbank', 'name': 'Т‑Банк', 'webUrl': 'https://www.tbank.ru/login/'},
     'alfa': {'id': 'alfa', 'name': 'Альфа‑Банк', 'webUrl': 'https://web.alfabank.ru/'},
 }
 ALIASES = {
+    'сбер': 'sber', 'сбербанк': 'sber', 'sberbank': 'sber',
+    'втб': 'vtb', 'банквтб': 'vtb', 'vtb': 'vtb',
     'тбанк': 'tbank',
     'tbank': 'tbank',
     'тинькофф': 'tbank',

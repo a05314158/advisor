@@ -14,6 +14,7 @@
     .cashback-dialog .dialog-card{width:min(480px,100%);max-height:calc(100dvh - 40px)}.cashback-dialog fieldset{min-width:0;margin:10px 0;padding:12px;border:1px solid var(--line);border-radius:14px}.cashback-dialog .cb-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cb-fields .wide{grid-column:1/-1}.cashback-dialog .shot-form input,.cashback-dialog .shot-form select{min-width:0;background:var(--paper);color:var(--ink)}.cashback-dialog .shot-form input[type=checkbox]{width:19px;height:19px;min-height:0;accent-color:var(--green)}.cashback-dialog label.cb-check{display:flex;align-items:center;gap:8px;margin:12px 0;color:var(--ink)}.cashback-dialog button:not(.confirm):not(.close){background:var(--paper);border:1px solid var(--line);color:var(--ink);padding:9px 12px;border-radius:12px}.cashback-dialog button:disabled{opacity:.55;cursor:default}.cashback-dialog legend,.cashback-dialog h3{font-weight:750}.cb-note,.cb-warning{color:var(--muted);font-size:14px;line-height:1.45;margin:5px 0}.cb-warning{border-inline-start:3px solid var(--yellow);padding-inline-start:9px}.cashback-dialog .auth-error:empty,.cb-note:empty{display:none}.cashback-dialog #planResult{overflow-wrap:anywhere}.cashback-dialog #spendingInputs{display:grid;gap:9px}.cashback-dialog #planResult article{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.cashback-dialog #planResult h3{margin:0}.cashback-dialog #planResult button{margin-top:6px}
     #planResult h3{margin:16px 0 4px}#planResult p{margin:8px 0 0}
   </style>
+  <style>.bank-result-link{display:inline-flex;align-items:center;min-height:44px;color:inherit;text-underline-offset:3px}</style>
 </head>
 <body>
   <iframe id="welcomeScreen" title="Советник — больше кэшбэка" src="welcome.html" style="position:fixed;z-index:5;inset:0;width:100%;height:100dvh;border:0;background:#f6f3ed"></iframe>
@@ -152,7 +153,43 @@
     $('cardsBack').addEventListener('click',showHome);
     function paintCategories(){const grid=$('categoryGrid');grid.replaceChildren();const available={...categories};for(const card of manual)for(const rule of card.rules||[]){if(rule.categoryId&&!available[rule.categoryId])available[rule.categoryId]=rule.label||rule.categoryId}if(!Object.hasOwn(available,buyCategory))buyCategory='';for(const [id,name] of Object.entries(available)){const button=document.createElement('button');button.type='button';button.dataset.id=id;button.setAttribute('aria-pressed',String(buyCategory===id));button.innerHTML=`<span class="category-mark">${escapeHtml(name.charAt(0))}</span><span>${escapeHtml(name)}</span>`;button.addEventListener('click',()=>{buyCategory=id;for(const item of grid.children)item.setAttribute('aria-pressed',String(item===button));runBuy()});grid.append(button)}}
     function kopecksOf(value){const text=value.replace(/\s/g,'').replace(',','.');return /^\d+(\.\d{1,2})?$/.test(text)?Math.round(Number(text)*100):0}
-    async function runBuy(){const token=++buyToken;const amount=kopecksOf($('buyAmount').value);$('buyResults').replaceChildren();if(!buyCategory){$('buyStatus').textContent='Выберите категорию';return}if(!amount){$('buyStatus').textContent='';return}$('buyStatus').textContent='Считаем…';try{const data=await api('/api/recommendations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categoryId:buyCategory,amountKopecks:amount,scope:'mine'})});if(token!==buyToken)return;$('buyStatus').textContent=data.allMatches.length?'':'В этой категории кэшбэка нет';data.allMatches.forEach((item,index)=>{const card=document.createElement('article');card.className='saved-card';card.innerHTML=`<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index?'': 'Лучшая · '}${escapeHtml(money(item.cashbackKopecks))}</small></div><button class="pick" type="button">Выбрать</button>`;card.querySelector('button').addEventListener('click',()=>lockPurchase(item.cardId));$('buyResults').append(card)})}catch(error){if(token===buyToken)$('buyStatus').textContent=error.message}}
+    async function runBuy() {
+      const token = ++buyToken;
+      const amount = kopecksOf($('buyAmount').value);
+      $('buyResults').replaceChildren();
+      if (!buyCategory || !amount) {
+        $('buyStatus').textContent = buyCategory ? '' : 'Выберите категорию';
+        return;
+      }
+      $('buyStatus').textContent = 'Считаем…';
+      try {
+        const data = await api('/api/recommendations', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({categoryId: buyCategory, amountKopecks: amount, scope: 'mine'})
+        });
+        if (token !== buyToken) return;
+        $('buyStatus').textContent = data.allMatches.length ? '' : 'В этой категории кэшбэка нет';
+        data.allMatches.forEach((item, index) => {
+          const card = document.createElement('article');
+          card.className = 'saved-card';
+          card.innerHTML = `<div class="saved-info"><strong>${escapeHtml(item.cardName)}</strong><small>${index ? '' : 'Лучшая · '}${escapeHtml(money(item.cashbackKopecks))}</small></div><button class="pick" type="button">Выбрать</button>`;
+          if (item.bankAccess) {
+            const link = document.createElement('a');
+            link.className = 'bank-result-link';
+            link.href = item.bankAccess.webUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'Веб-кабинет банка';
+            link.setAttribute('aria-label', `Открыть веб-кабинет: ${item.bankAccess.name}`);
+            card.querySelector('.saved-info').append(link);
+          }
+          card.querySelector('button').addEventListener('click', () => lockPurchase(item.cardId));
+          $('buyResults').append(card);
+        });
+      } catch (error) {
+        if (token === buyToken) $('buyStatus').textContent = error.message;
+      }
+    }
     let buyTimer=0;
     $('buyAmount').addEventListener('input',()=>{++buyToken;$('buyResults').replaceChildren();clearTimeout(buyTimer);buyTimer=setTimeout(runBuy,80)});
     let purchasePending=false,purchaseAttempt=null;

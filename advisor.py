@@ -15,10 +15,12 @@ import cashback_sets as monthly
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
+from bank_links import bank_access
 from cashback_planner import mount_planner
 from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows
 PAGE = Path(__file__).with_name('wallet.html')
 SCRIPT = Path(__file__).with_name('wallet-cashback.js')
+BUILD_REVISION = '$Format:%H$'
 
 
 
@@ -216,6 +218,10 @@ def create_app(db_path):
     def home():
         return FileResponse(PAGE)
 
+    @app.get('/bank-link-test', include_in_schema=False)
+    def bank_link_test():
+        return FileResponse(PAGE.with_name('bank-link-test.html'))
+
     @app.get('/welcome.html', include_in_schema=False)
     def welcome():
         return FileResponse(PAGE.with_name('welcome.html'))
@@ -277,7 +283,14 @@ def create_app(db_path):
     def health():
         with connect(db_path) as db:
             db.execute('SELECT 1 FROM rules LIMIT 1').fetchone()
-        return {'status': 'ok'}
+        status = {'status': 'ok'}
+        if re.fullmatch(r'[0-9a-f]{40}', BUILD_REVISION):
+            status['revision'] = BUILD_REVISION
+        return status
+
+    @app.get('/api/categories')
+    def categories():
+        return CATEGORIES
 
     @app.get('/api/cards')
     def cards(categoryId: str | None = None):
@@ -481,24 +494,32 @@ def create_app(db_path):
                 return JSONResponse({'field': 'categoryId', 'code': 'unknown_category'}, 422)
             if scope != 'mine':
                 rules, own = rows(db), None
-        return recommend(category, amount, datetime.now(UTC).date(), rules, own)
+        result = recommend(category, amount, datetime.now(UTC).date(), rules, own)
+        if scope == 'mine':
+            for item in result['allMatches']:
+                access = bank_access(item['bankName'])
+                if access:
+                    item['bankAccess'] = access
+        return result
 
     def owned_rules(db, request):
         rules = rows(db)
         own = set(saved(db, request))
         session = session_id(request)
         today = datetime.now(UTC).date()
+        banks = bank_names()
         for card in manual_cards(db, request):
             own.add(card['cardId'])
+            bank_name = banks.get(card.get('bankId'), card['name'])
             for rule in card['rules']:
                 if rule.get('label') and rule.get('minAmountKopecks') is not None:
                     continue
-                item = {**rule, 'cardId': card['cardId'], 'cardName': card['name'], 'bankName': 'Со скриншота',
+                item = {**rule, 'cardId': card['cardId'], 'cardName': card['name'], 'bankName': bank_name,
                         'validFrom': card['updatedOn'], 'updatedOn': card['updatedOn'], 'validUntilExclusive': None}
                 item.setdefault('minAmountKopecks', 1)
                 rules.append(item)
-        for card_id, name, payload in db.execute(
-                '''SELECT s.card_id, m.name, s.rules_json FROM cashback_sets s
+        for card_id, name, bank_id, payload in db.execute(
+                '''SELECT s.card_id, m.name, s.bank_id, s.rules_json FROM cashback_sets s
                    JOIN manual_cards m ON m.session = s.session AND m.card_id = s.card_id
                    WHERE s.session = ? AND s.month = ? AND s.mode = 'active' ''',
                 (session, today.strftime('%Y-%m'))):
@@ -507,7 +528,7 @@ def create_app(db_path):
             for rule in json.loads(payload):
                 if rule.get('selected') is not True or rule.get('uncertain') or type(rule.get('rateBps')) is not int:
                     continue
-                rules.append(dict(cardId=card_id, cardName=name, bankName='Со скриншота', categoryId=rule['categoryId'],
+                rules.append(dict(cardId=card_id, cardName=name, bankName=banks.get(bank_id, name), categoryId=rule['categoryId'],
                                   label=rule.get('label'), rateBps=rule['rateBps'], limitKopecks=rule.get('limitKopecks'),
                                   minAmountKopecks=rule.get('minAmountKopecks', 1), validFrom=start,
                                   validUntilExclusive=end, updatedOn=start, uncertain=False))
