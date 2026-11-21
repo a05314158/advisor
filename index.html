@@ -99,11 +99,6 @@
       <p id="cards-status" role="status"></p>
       <button type="button" class="secondary" id="retry" hidden>Повторить загрузку</button>
       <div id="my-list" class="stack"></div>
-      <details id="products">
-        <summary>Условия реальных карт</summary>
-        <p>Для расчёта добавьте карту и укажите ставки из приложения вашего банка.</p>
-        <div id="product-list" class="stack"></div>
-      </details>
       <details id="catalog">
         <summary>Учебный каталог карт</summary>
         <div class="stack">
@@ -127,7 +122,6 @@
             <strong id="chosen-bank"></strong>
             <button type="button" class="secondary" id="change-bank">Сменить банк</button>
           </div>
-          <div id="bank-product" class="card" hidden></div>
           <label id="manual-bank-label" hidden>Название банка<input id="manual-bank" maxlength="80" required></label>
           <label id="manual-name-label">Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
           <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
@@ -178,7 +172,6 @@ const featuredBanks = [
   {registrationNumber:'3542', name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
   {registrationNumber:'3027', name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
 ];
-let cardProfiles = [];
 let bankDirectory = featuredBanks;
 let bankLimit = featuredBanks.length;
 let bankDirectoryState = 'loading';
@@ -529,43 +522,10 @@ function renderBankChoices() {
     : query ? 'Найдено банков: ' + list.length : '';
 }
 
-function productConditions(profile, example = false) {
-  const link = element('a', 'Официальные условия');
-  link.href = profile.source;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  return [element('strong', example ? 'Пример продукта: ' + profile.product : profile.product), element('p', profile.note), link,
-    element('small', 'Проверено ' + profile.checkedOn.split('-').reverse().join('.') +
-      '. Ставку и лимит укажите по своим условиям.')];
-}
-
-function showBankProduct(name) {
-  const profile = cardProfiles.find(card => card.bankName === name);
-  const product = $('bank-product');
-  product.hidden = !profile;
-  product.replaceChildren(...(profile ? productConditions(profile, true) : []));
-}
-
-async function loadProducts() {
-  const list = $('product-list');
-  try {
-    cardProfiles = await api('/api/products');
-    list.replaceChildren(...cardProfiles.map(profile => {
-      const item = element('article', '', 'card');
-      item.append(element('h3', profile.bankName), ...productConditions(profile));
-      return item;
-    }));
-    showBankProduct($('manual-bank').value);
-  } catch {
-    list.textContent = 'Не удалось загрузить условия. Обновите страницу.';
-  }
-}
-
 function selectBank(name) {
   $('bank-picker').hidden = true;
   $('manual-form').hidden = false;
   $('chosen-bank').textContent = name || 'Другой банк';
-  showBankProduct(name);
   $('manual-bank-label').hidden = Boolean(name);
   $('manual-bank').readOnly = Boolean(name);
   $('manual-bank').value = name || '';
@@ -1045,7 +1005,6 @@ $('purchase-form').onsubmit = async event => {
 
 renderBankChoices();
 loadBankDirectory();
-loadProducts();
 addRow();
 updateCards();
 loadAccount();

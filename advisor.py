@@ -18,7 +18,6 @@ from observability import mount_observability
 from spending import mount_spending
 PAGE = Path(__file__).with_name('index.html')
 BANKS = Path(__file__).with_name('banks_ru.json')
-PRODUCTS = Path(__file__).with_name('products_ru.json')
 BUILD_REVISION = '$Format:%H$'
 CATEGORY_IDS = {label.casefold(): category_id for category_id, label in CATEGORIES.items()}
 CATEGORY_IDS['кафе и рестораны'] = 'cafe'
@@ -149,7 +148,6 @@ def create_app(db_path):
     @asynccontextmanager
     async def lifespan(app):
         app.state.html = PAGE.read_bytes()
-        app.state.products = json.loads(PRODUCTS.read_text(encoding='utf-8-sig'))
         app.state.bank_directory = json.loads(BANKS.read_text(encoding='utf-8'))
         initialize(db_path)
         yield
@@ -175,10 +173,6 @@ def create_app(db_path):
     @app.get('/api/banks')
     def banks():
         return app.state.bank_directory
-
-    @app.get('/api/products')
-    def products():
-        return app.state.products
 
     @app.get('/api/categories')
     def categories():
