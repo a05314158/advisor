@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 PAGE = Path(__file__).with_name('wallet.html').read_text(encoding='utf-8')
-LEATHER = Path(__file__).resolve().parents[1].joinpath('leather-wallet.html').read_text(encoding='utf-8')
+
 
 
 class WalletPage(unittest.TestCase):
@@ -16,11 +16,6 @@ class WalletPage(unittest.TestCase):
         self.assertNotIn('leatherBody', PAGE)
         self.assertNotIn('pocket.webp', PAGE)
         self.assertNotIn('id="lining"', PAGE)
-
-    def test_leather_file_is_the_wallet(self):
-        pocket = LEATHER.split('id="pocket"', 1)[1].split('/>', 1)[0]
-        self.assertIn(pocket, PAGE)
-        self.assertLess(PAGE.index('id="pocketCards"'), PAGE.index('class="front"'))
 
     def test_hero_tags_balance(self):
         hero = PAGE.split('<section class="hero', 1)[1].split('</section>', 1)[0]

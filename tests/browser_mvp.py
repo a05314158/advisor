@@ -13,7 +13,7 @@ def check(base, chromium=None):
             page = browser.new_page(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.goto(base)
+            page.goto(base + '/classic')
             assert page.request.get(base + '/api/nearby').status == 404
 
             scope, category = page.locator('#scope'), page.locator('#category')

@@ -35,7 +35,7 @@ class CashbackScreenshot(unittest.TestCase):
           {"categoryId":"Фастфуд","ratePercent":"4%"}
         ]}'''
         rules = {rule['categoryId']: rule['rateBps'] for rule in parse_rules(text)}
-        self.assertEqual(rules, {'cafe': 400, 'transport': 1500, 'entertainment': 500, 'all': 100})
+        self.assertEqual(rules, {'fast_food': 400, 'taxi': 300, 'transport': 1500, 'entertainment': 500, 'all': 100})
 
     def test_words_and_percent_signs(self):
         text = '{"rules":[{"categoryId":"Супермаркеты","ratePercent":"5%","limitRub":"без лимита"},{"categoryId":"cafe","ratePercent":"1,5","limitRub":"3 000"}]}'

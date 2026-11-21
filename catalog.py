@@ -4,14 +4,28 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from unicodedata import category, normalize
 
-CATEGORIES = {
-    'supermarkets': 'Супермаркеты', 'cafe': 'Кафе', 'fuel': 'АЗС',
-    'pharmacy': 'Аптеки', 'transport': 'Транспорт', 'clothing': 'Одежда',
-    'electronics': 'Электроника', 'marketplace': 'Маркетплейсы',
-    'entertainment': 'Развлечения', 'utilities': 'Связь и ЖКХ',
-    'travel': 'Путешествия', 'all': 'Все покупки',
+CATEGORY_GROUPS = {
+    'Еда и покупки': {
+        'supermarkets': 'Супермаркеты', 'groceries': 'Продукты', 'cafe': 'Кафе',
+        'fast_food': 'Фастфуд', 'marketplaces': 'Маркетплейсы', 'alcohol': 'Алкоголь',
+    },
+    'Повседневные расходы и дом': {
+        'pharmacies': 'Аптеки', 'clothes': 'Одежда и обувь', 'home': 'Дом и ремонт',
+        'pets': 'Животные', 'books': 'Книги', 'flowers': 'Цветы', 'kids': 'Детские товары',
+    },
+    'Дорога и поездки': {
+        'fuel': 'АЗС', 'taxi': 'Такси', 'car_sharing': 'Каршеринг', 'transport': 'Транспорт',
+        'tickets': 'Авиа- и ж/д билеты', 'hotels': 'Отели',
+    },
+    'Досуг и уход': {
+        'beauty': 'Красота', 'entertainment': 'Развлечения', 'cinema': 'Кино',
+        'sports': 'Спорттовары и тренировки', 'subscriptions': 'Подписки', 'digital': 'Цифровые товары',
+    },
 }
+CATEGORIES = {category_id: label for group in CATEGORY_GROUPS.values() for category_id, label in group.items()}
+CATEGORIES.update({'pharmacy': 'Аптеки', 'clothing': 'Одежда', 'electronics': 'Электроника', 'marketplace': 'Маркетплейсы', 'utilities': 'Связь и ЖКХ', 'travel': 'Путешествия', 'all': 'Все покупки'})
 BANKS = (
     ('sber', 'СберБанк', '#0C8C50', '#FFFFFF', ''),
     ('vtb', 'ВТБ', '#0050D8', '#FFFFFF', ''),
@@ -55,6 +69,7 @@ FIELDS = tuple(SEED[0])
 def connect(path):
     db = sqlite3.connect(path)
     try:
+        db.execute('PRAGMA foreign_keys = ON')
         with db:
             yield db
     finally:
@@ -68,47 +83,94 @@ def setup(db):
           minAmountKopecks INTEGER, validFrom TEXT, validUntilExclusive TEXT, updatedOn TEXT,
           PRIMARY KEY (cardId, categoryId, validFrom)
         );
+        CREATE TABLE IF NOT EXISTS catalog_cards (
+          id TEXT PRIMARY KEY, bank_name TEXT NOT NULL, name TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS saved (
           session TEXT, cardId TEXT, PRIMARY KEY(session, cardId)
-        );
-        CREATE TABLE IF NOT EXISTS users (
-          session TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
-          password_hash TEXT NOT NULL, created_on TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS manual_cards (
           session TEXT NOT NULL, card_id TEXT NOT NULL, name TEXT NOT NULL,
           updated_on TEXT NOT NULL, rules_json TEXT NOT NULL,
           PRIMARY KEY(session, card_id)
         );
-        CREATE TABLE IF NOT EXISTS purchases (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          session TEXT NOT NULL, bought_on TEXT NOT NULL, category_id TEXT NOT NULL,
-          amount_kopecks INTEGER NOT NULL,
-          recommended_card TEXT NOT NULL, recommended_name TEXT NOT NULL, recommended_kopecks INTEGER NOT NULL,
-          chosen_card TEXT NOT NULL, chosen_name TEXT NOT NULL, chosen_kopecks INTEGER NOT NULL,
-          usual_kopecks INTEGER, catalog_version TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS accounts (
+          id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt BLOB NOT NULL, password_hash BLOB NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS usual_card (
-          session TEXT PRIMARY KEY, card_id TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          digest BLOB PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
+        CREATE TABLE IF NOT EXISTS monthly_usage (
+          owner TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
+          used INTEGER NOT NULL CHECK(used BETWEEN 0 AND 1000000000000),
+          PRIMARY KEY(owner, card_id, month),
+          FOREIGN KEY(owner, card_id) REFERENCES manual_cards(session, card_id)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS purchases (
+          id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id),
+          day TEXT NOT NULL, category TEXT NOT NULL, merchant TEXT NOT NULL,
+          amount INTEGER NOT NULL CHECK(amount BETWEEN 1 AND 1000000000000),
+          used_card TEXT, estimates TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS purchases_account_day ON purchases(account_id, day);
+        CREATE TABLE IF NOT EXISTS purchase_cashback (
+          purchase_id TEXT PRIMARY KEY REFERENCES purchases(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL CHECK(amount BETWEEN 0 AND 1000000000000)
+        );
+        CREATE TABLE IF NOT EXISTS purchase_requests (
+          account_id TEXT NOT NULL REFERENCES accounts(id), request_key TEXT NOT NULL,
+          payload_digest TEXT NOT NULL, purchase_id TEXT NOT NULL,
+          PRIMARY KEY(account_id, request_key)
+        );
+        CREATE TABLE IF NOT EXISTS catalog_monthly_usage (
+          owner TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
+          used INTEGER NOT NULL CHECK(used BETWEEN 0 AND 1000000000000),
+          PRIMARY KEY(owner, card_id, month),
+          FOREIGN KEY(owner, card_id) REFERENCES saved(session, cardId)
+            ON UPDATE CASCADE ON DELETE CASCADE
         );
     ''')
-    columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
-    if 'password_hash' not in columns:
-        db.execute('DROP TABLE users')
-        db.execute('''CREATE TABLE users (
-          session TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
-          password_hash TEXT NOT NULL, created_on TEXT NOT NULL
-        )''')
+    db.execute('BEGIN IMMEDIATE')
+    columns = {col[1] for col in db.execute('PRAGMA table_info(manual_cards)')}
+    if 'bank_name' not in columns:
+        db.execute("ALTER TABLE manual_cards ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''")
+    if 'monthly_limit' not in columns:
+        db.execute('ALTER TABLE manual_cards ADD COLUMN monthly_limit INTEGER CHECK(monthly_limit BETWEEN 0 AND 1000000000000)')
+    if not any(col[1] == 'monthly_limit' for col in db.execute('PRAGMA table_info(saved)')):
+        db.execute('ALTER TABLE saved ADD COLUMN monthly_limit INTEGER CHECK(monthly_limit BETWEEN 0 AND 1000000000000)')
+    db.commit()
 
 
 def rows(db):
-    return [dict(zip(FIELDS, row)) for row in db.execute('SELECT * FROM rules ORDER BY cardId, categoryId, validFrom')]
+    result = []
+    for *values, bank, name in db.execute('''SELECT r.cardId, r.categoryId, r.rateBps, r.limitKopecks,
+        r.minAmountKopecks, r.validFrom, r.validUntilExclusive, r.updatedOn, c.bank_name, c.name
+        FROM rules r LEFT JOIN catalog_cards c ON c.id=r.cardId
+        ORDER BY r.cardId, r.categoryId, r.validFrom'''):
+        rule = dict(zip(FIELDS, values))
+        if bank is not None:
+            rule.update(bankName=bank, cardName=name)
+        result.append(rule)
+    return result
+
+
+def catalog_label(value):
+    if not isinstance(value, str) or any(category(char) in {'Cc', 'Cf', 'Cs'} for char in value):
+        raise ValueError('Неверное название банка или карты')
+    clean = ' '.join(normalize('NFC', value).split())
+    if not 1 <= len(clean) <= 80:
+        raise ValueError('Неверное название банка или карты')
+    return clean
 
 
 def apply_rules(db, items):
-    seen = set()
+    seen, names = set(), {}
+    metadata_fields = {'bankName', 'cardName'}
+    fields = set(FIELDS)
     for rule in items:
-        if not isinstance(rule, dict) or set(rule) != set(FIELDS):
+        if not isinstance(rule, dict) or set(rule) not in (fields, fields | metadata_fields):
             raise ValueError('Неверные поля условия')
         c, k, r, l, m, start, end, updated = (rule[f] for f in FIELDS)
         if (not isinstance(c, str) or not c.isascii() or not c.isalnum() or len(c) > 32
@@ -122,7 +184,14 @@ def apply_rules(db, items):
         if start >= end or (c, k, start) in seen:
             raise ValueError('Пустой период или повтор правила в пакете')
         seen.add((c, k, start))
+        if metadata_fields <= rule.keys():
+            metadata = catalog_label(rule['bankName']), catalog_label(rule['cardName'])
+            if names.setdefault(c, metadata) != metadata:
+                raise ValueError(f'Несогласованные названия для карты: {c}')
         db.execute('INSERT OR REPLACE INTO rules VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (c,k,r,l,m,start,end,updated))
+    db.executemany('''INSERT INTO catalog_cards (id, bank_name, name) VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET bank_name=excluded.bank_name, name=excluded.name''',
+        ((card, bank, name) for card, (bank, name) in names.items()))
     previous = None
     for rule in rows(db):
         key = rule['cardId'], rule['categoryId']

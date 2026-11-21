@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Советник — выбор карты</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eff4ef; color: #182b27; font: 1rem/1.5 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 40rem); margin: 2rem auto 3rem; }
+    h1, h2, h3, p { margin: 0; overflow-wrap: anywhere; }
+    h1 { font-size: clamp(1.85rem, 6vw, 2.5rem); line-height: 1.12; margin-bottom: 1rem; }
+    h2 { font-size: 1.2rem; }
+    h3 { font-size: 1rem; }
+    .panel, .card { background: white; border: 1px solid #d2ded6; border-radius: .8rem; padding: 1rem; }
+    .panel + .panel, #results:not(:empty), .management { margin-top: .85rem; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    input, select, button { font: inherit; min-height: 44px; }
+    input, select { width: 100%; min-width: 0; border: 1px solid #677f72; border-radius: .45rem; padding: .45rem .65rem; background: white; color: inherit; }
+    button, .outbound { border: 1px solid #155540; border-radius: .45rem; padding: .45rem .8rem; background: #155540; color: white; cursor: pointer; }
+    button.secondary, .outbound.secondary { background: white; color: #155540; }
+    .outbound { display: inline-flex; align-items: center; min-height: 44px; width: fit-content; text-decoration: none; }
+    button:disabled { opacity: .65; cursor: default; }
+    :focus-visible { outline: 2px solid #155540; outline-offset: 3px; }
+    .stack { display: grid; gap: .7rem; }
+    [hidden] { display: none !important; }
+    .fields { display: grid; gap: .65rem; }
+    @media (min-width: 32rem) { .fields { grid-template-columns: 1.4fr 1fr; } }
+    .card { display: grid; gap: .5rem; overflow-wrap: anywhere; }
+    .card button { justify-self: start; }
+    .winner { background: #e0f1e7; border-color: #7caa94; }
+    .return { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .winner .return { font-size: 1.75rem; }
+    .muted, small { color: #4b6257; }
+    p[role=status]:empty { margin: 0; }
+    #status:not(:empty) { margin-top: .6rem; }
+    summary { cursor: pointer; padding: .45rem 0; min-height: 44px; }
+    details > .stack { margin-top: .35rem; }
+    ul { margin: .35rem 0 0; padding-left: 1.15rem; }
+    fieldset { min-width: 0; margin: 0; border: 1px solid #d2ded6; border-radius: .55rem; padding: .75rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .bank-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; }
+    .bank-tile { display:flex; align-items:center; gap:.55rem; text-align:left; min-height:54px; border-color:#7d9487; padding:.4rem .5rem; overflow-wrap:anywhere; }
+    .bank-mark { flex:none; display:grid; place-items:center; width:2rem; height:2rem; border-radius:.45rem; font-weight:800; background:var(--mark-bg); color:var(--mark-ink); }
+    .category-choice { padding-inline:.55rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Какой картой заплатить?</h1>
+<section class="panel stack" aria-label="Аккаунт">
+  <p id="account-status" role="status">Проверяем вход…</p>
+  <form id="account-form" class="stack" hidden>
+    <label>Логин (латиница, цифры, точка, дефис или подчёркивание)<input id="username" autocomplete="username" required minlength="3" maxlength="32"></label>
+    <label>Пароль (от 12 символов)<input id="password" type="password" required minlength="12" maxlength="128"></label>
+    <label>Перенести гостевые карты при регистрации <input id="transfer-guest" type="checkbox"></label>
+    <button type="submit" value="login">Войти</button><button type="submit" value="register">Зарегистрироваться</button>
+  </form>
+  <button type="button" id="logout" hidden>Выйти</button>
+</section>
+  <form id="calc" class="panel stack">
+    <label>Какие карты сравнить
+      <select id="scope"><option value="mine">Мои карты</option><option value="all">Весь каталог</option></select>
+    </label>
+    <div class="fields">
+      <label>Категория покупки<select id="category" required><option value="">Выберите категорию</option></select></label>
+      <label>Сумма покупки, ₽<input id="amount" inputmode="decimal" maxlength="14" required></label>
+    </div>
+    <div>
+    </div>
+    <button id="compare" disabled>Рассчитать кэшбэк</button>
+  </form>
+  <p id="status" role="status"></p>
+  <section id="results" class="stack" aria-label="Результаты расчёта"></section>
+  <section class="panel stack" aria-labelledby="spending-title">
+    <h2 id="spending-title">Статистика трат</h2>
+    <p id="spending-guest">Войдите в аккаунт, чтобы записывать покупки и видеть отчёт.</p>
+    <div id="spending-content" class="stack" hidden>
+      <details id="purchase-entry"><summary>Записать покупку</summary>
+        <form id="purchase-form" class="stack">
+          <label>Дата покупки<input id="purchase-date" type="date" required></label>
+          <label>Сумма, ₽<input id="purchase-amount" inputmode="decimal" maxlength="14" required></label>
+          <label>Категория<input id="purchase-category" list="known-categories" maxlength="80" required></label>
+          <label>Магазин или место (необязательно)<input id="purchase-merchant" maxlength="120"></label>
+          <label>Какая карта использована<select id="purchase-card"><option value="">Не указана</option></select></label>
+          <button>Сохранить покупку</button>
+          <p id="purchase-status" role="status"></p>
+        </form>
+      </details>
+      <label>Отчёт за месяц<input id="spending-month" type="month" required></label>
+      <p id="spending-status" role="status"></p>
+      <div id="spending-report" class="stack"></div>
+    </div>
+  </section>
+
+  <div class="management">
+    <section class="panel stack" aria-labelledby="mine-heading">
+      <h2 id="mine-heading">Мои карты</h2>
+      <p id="cards-status" role="status"></p>
+      <button type="button" class="secondary" id="retry" hidden>Повторить загрузку</button>
+      <div id="my-list" class="stack"></div>
+      <details id="catalog">
+        <summary>Учебный каталог карт</summary>
+        <div class="stack">
+          <label>Категория в каталоге<select id="catalog-category"><option value="">Все категории</option></select></label>
+          <div id="catalog-list" class="stack"></div>
+        </div>
+      </details>
+      <details id="manual-entry">
+        <summary>Добавить карту</summary>
+        <div id="bank-picker" class="stack">
+          <label>Найти банк<input id="bank-search" type="search" autocomplete="off" placeholder="Например, Т‑Банк"></label>
+          <div class="bank-grid" id="bank-options" aria-label="Банки"></div>
+          <p id="bank-status" class="muted" role="status"></p>
+          <div class="actions">
+            <button type="button" class="secondary" id="more-banks" hidden>Показать ещё</button>
+            <button type="button" class="secondary" id="other-bank">Другой банк</button>
+          </div>
+        </div>
+        <form id="manual-form" class="stack" hidden>
+          <div class="actions">
+            <strong id="chosen-bank"></strong>
+            <button type="button" class="secondary" id="change-bank">Сменить банк</button>
+          </div>
+          <label id="manual-bank-label" hidden>Название банка<input id="manual-bank" maxlength="80" required></label>
+          <label id="manual-name-label">Название карты (без номера)<input id="manual-name" required maxlength="80"></label>
+          <label>Общий лимит кэшбэка за месяц, ₽<input id="manual-monthly-cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
+          <label>Уже начислено в этом месяце, ₽<input id="manual-monthly-used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
+          <div id="manual-rules" class="stack"></div>
+          <div class="actions">
+            <button type="button" class="secondary" id="add-rule">Ещё категория</button>
+            <button id="save-card" disabled>Сохранить карту</button>
+          </div>
+          <p id="manual-status" role="status"></p>
+        </form>
+      </details>
+    </section>
+  </div>
+
+  <template id="rule-template">
+    <fieldset class="stack">
+      <label>Категория<input name="category" required maxlength="80" placeholder="Найти или указать свою"></label>
+      <div class="actions" data-category-choices aria-label="Категории кэшбэка"></div>
+      <div class="fields">
+        <label>Кэшбэк, %<input name="rate" required inputmode="decimal" maxlength="6"></label>
+        <label>Лимит возврата, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Необязательно"></label>
+      </div>
+  <label>Минимальная сумма покупки, ₽<input name="minimum" inputmode="decimal" maxlength="14" placeholder="Без минимума"></label>
+  <label>Условия действуют с (пусто — с сегодняшнего дня)<input name="start" type="date"></label>
+  <label>До какой даты (не включая, необязательно)<input name="end" type="date"></label>
+      <button type="button" class="secondary" data-remove>Убрать строку</button>
+    </fieldset>
+  </template>
+  <datalist id="known-categories"></datalist>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const money = n => (n / 100).toLocaleString('ru-RU', {style: 'currency', currency: 'RUB'});
+let version = 0;
+let busy = false;
+let dataReady = false;
+let categories = {};
+let categoryGroups = {};
+let catalog = [];
+let saved = new Set();
+let catalogBalances = {};
+const featuredBanks = [
+  {registrationNumber:'2673', name:'Т‑Банк', mark:'Т', aliases:'Тинькофф Tinkoff TBank', bg:'#ffd524', ink:'#211c0e'},
+  {registrationNumber:'1326', name:'Альфа‑Банк', mark:'А', aliases:'Alfa Bank', bg:'#be1a22', ink:'#fff'},
+  {registrationNumber:'1481', name:'Сбер', mark:'С', aliases:'Сбербанк Sberbank', bg:'#08734e', ink:'#fff'},
+  {registrationNumber:'1000', name:'ВТБ', mark:'В', aliases:'VTB', bg:'#10448c', ink:'#fff'},
+  {registrationNumber:'3542', name:'Озон Банк', mark:'О', aliases:'Ozon', bg:'#2148d9', ink:'#fff'},
+  {registrationNumber:'3027', name:'Яндекс Банк', mark:'Я', aliases:'Yandex Яндекс Пэй', bg:'#f0e4ff', ink:'#25202e'}
+];
+let bankDirectory = featuredBanks;
+let bankLimit = featuredBanks.length;
+let bankDirectoryState = 'loading';
+const bankPageSize = 24;
+const popularCategories = ['supermarkets','groceries','cafe','taxi','pharmacies','marketplaces'];
+let manual = [];
+
+function element(tag, text, className) {
+  const item = document.createElement(tag);
+  if (text) item.textContent = text;
+  if (className) item.className = className;
+  return item;
+}
+
+function monthlyForm(card) {
+  const form = document.createElement('form');
+  form.innerHTML = `<strong>Общий месячный лимит карты</strong>
+    <p data-balance></p>
+    <label>Максимальный кэшбэк за месяц, ₽<input name="cap" inputmode="decimal" maxlength="14" placeholder="Если известен"></label>
+    <label>Уже начислено в этом месяце, ₽<input name="used" inputmode="decimal" maxlength="14" placeholder="Пусто — неизвестно"></label>
+    <button>Сохранить месячный лимит</button><p data-message role="status"></p>`;
+  const capInput = form.elements.namedItem('cap'), usedInput = form.elements.namedItem('used');
+  const balance = form.querySelector('[data-balance]'), message = form.querySelector('[data-message]');
+  const monthly = card.monthly;
+  const decimal = n => (n / 100).toLocaleString('ru-RU', {useGrouping:false, maximumFractionDigits:2});
+  function showBalance() {
+    const description = monthly.limitKopecks === null ? 'Общий лимит не задан; расчёт не учитывает месячный остаток'
+      : monthly.remainingKopecks === null ? `Остаток неизвестен; в расчёте полный лимит ${money(monthly.limitKopecks)}`
+      : `Известный остаток: ${money(monthly.remainingKopecks)} из ${money(monthly.limitKopecks)}`;
+    balance.textContent = `${monthly.month} (UTC) · ${description}`;
+    if (monthly.remainingKopecks === 0 || monthly.limitKopecks === 0) balance.textContent += ' · Карта исключена из рекомендаций';
+  }
+  capInput.value = monthly.limitKopecks === null ? '' : decimal(monthly.limitKopecks);
+  usedInput.value = monthly.usedKopecks === null ? '' : decimal(monthly.usedKopecks);
+  showBalance();
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy || authBusy) return;
+    const limitKopecks = optionalAmount(capInput), usedKopecks = optionalAmount(usedInput);
+    if ([limitKopecks, usedKopecks].some(Number.isNaN)) {
+      message.textContent = 'Укажите неотрицательные суммы до 10 млрд ₽ с точностью до копейки.';
+      return;
+    }
+    const button = form.querySelector('button');
+    busy = button.disabled = true;
+    compareEnabled();
+    try {
+      const route = card.cardName ? 'cards' : 'manual-cards';
+      await api(`/api/me/${route}/${encodeURIComponent(card.cardId)}/monthly-limit`,
+        {method:'PUT', body:{month:monthly.month, limitKopecks, usedKopecks}});
+      Object.assign(monthly, {limitKopecks, usedKopecks,
+        remainingKopecks:limitKopecks === null || usedKopecks === null ? null : Math.max(0, limitKopecks - usedKopecks)});
+      showBalance();
+      clearResults();
+      message.textContent = 'Сохранено.';
+    } catch (error) {
+      message.textContent = error.message === 'HTTP 409' ? 'Начался новый месяц. Обновите страницу и укажите сумму за новый месяц.' : 'Не удалось сохранить лимит.';
+    } finally {
+      busy = button.disabled = false;
+      compareEnabled();
+    }
+  };
+  return form;
+}
+
+
+function fixed(text) {
+  const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.trim());
+  return match ? Number(match[1]) * 100 + Number((match[2] || '').padEnd(2, '0')) : NaN;
+}
+
+function optionalAmount(input) {
+  if (!input.value.trim()) return null;
+  const value = fixed(input.value);
+  return value >= 0 && value <= 10**12 ? value : NaN;
+}
+
+async function api(path, {method = 'GET', body, timeout = 8000, headers = {}} = {}) {
+  const request = {method, signal: AbortSignal.timeout(timeout)};
+  if (body) {
+    request.headers = {...headers, 'Content-Type': 'application/json'};
+    request.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, request);
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.status === 204 ? null : response.json();
+}
+
+function clearResults() {
+  version++;
+  $('results').replaceChildren();
+  $('status').textContent = '';
+}
+
+function compareEnabled() {
+  $('compare').disabled = busy || authBusy || !dataReady || !$('category').value;
+  $('save-card').disabled = busy || authBusy || !dataReady;
+}
+
+function renderCategories() {
+  const filter = $('catalog-category');
+  const previousFilter = filter.value;
+  filter.replaceChildren(new Option('Все категории', ''));
+  $('known-categories').replaceChildren();
+  const select = $('category');
+  const previous = select.value;
+  const known = Object.entries(categories);
+  for (const [id, name] of known) {
+    filter.add(new Option(name, id));
+    $('known-categories').append(new Option(name, name));
+  }
+  if (Object.hasOwn(categories, previousFilter)) filter.value = previousFilter;
+  select.replaceChildren(new Option('Выберите категорию', ''));
+  for (const [name, group] of Object.entries(categoryGroups)) {
+    const options = document.createElement('optgroup');
+    options.label = name;
+    options.append(...Object.entries(group).map(([id, label]) => new Option(label, id)));
+    select.append(options);
+  }
+  if ($('scope').value === 'mine') {
+    const keys = new Set(known.map(([, name]) => name.toLowerCase()));
+    keys.add('кафе и рестораны');
+    for (const card of manual) {
+      for (const rule of card.rules) {
+        if (keys.has(rule.categoryKey)) continue;
+        select.add(new Option(rule.categoryName, 'manual:' + rule.categoryName));
+        keys.add(rule.categoryKey);
+      }
+    }
+  }
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  $('manual-rules').querySelectorAll('fieldset').forEach(renderRuleChoices);
+  compareEnabled();
+}
+
+function ruleDetails(rule) {
+  const conditions = [
+    'От ' + money(rule.minAmountKopecks),
+    'Действует с ' + rule.validFrom,
+  ];
+  if (rule.validUntilExclusive) conditions.push('до ' + rule.validUntilExclusive + ' (не включая)');
+  conditions.push('Условия от ' + rule.updatedOn);
+  return conditions.join(' · ');
+}
+
+function rateAndLimit(rule) {
+  return rule.rateBps / 100 + '%' +
+    (rule.limitKopecks === null ? ' · лимит не задан' : ' · лимит ' + money(rule.limitKopecks));
+}
+
+function rateForm(card) {
+  const details = element('details');
+  const form = element('form', '', 'stack');
+  const categoryLabel = element('label', 'Категория');
+  const rateLabel = element('label', 'Новая ставка, %');
+  const select = element('select');
+  const input = element('input');
+  input.inputMode = 'decimal';
+  input.required = true;
+  input.maxLength = 6;
+  const submit = element('button', 'Сохранить ставку');
+  const message = element('p');
+  message.setAttribute('role', 'status');
+  for (const [index, rule] of card.rules.entries()) {
+    select.add(new Option(rule.categoryName, index));
+  }
+  const showRate = () => {
+    input.value = String(card.rules[Number(select.value)].rateBps / 100).replace('.', ',');
+  };
+  select.onchange = showRate;
+  showRate();
+  categoryLabel.append(select);
+  rateLabel.append(input);
+  form.append(categoryLabel, rateLabel, submit, message);
+  details.append(element('summary', 'Изменить ставку'), form);
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy || authBusy) return;
+    const rateBps = fixed(input.value);
+    if (!(rateBps >= 0 && rateBps <= 10000)) {
+      message.textContent = 'Введите процент от 0 до 100 с точностью до двух знаков.';
+      return;
+    }
+    const categoryName = card.rules[Number(select.value)].categoryName;
+    submit.disabled = true;
+    await updateCards(() => api('/api/me/manual-cards/' + encodeURIComponent(card.cardId) + '/rate',
+      {method:'PATCH', body:{categoryName, rateBps}}), 'Ставка сохранена. Можно пересчитать кэшбэк.');
+    submit.disabled = false;
+  };
+  return details;
+}
+
+function cardListing(card, action) {
+  const entry = element('article', '', 'card');
+  entry.append(element('h3', card.cardName || card.name));
+  if (card.bankName && card.bankName !== (card.cardName || card.name)) {
+    entry.append(element('p', card.bankName, 'muted'));
+  }
+  if (card.rules.length) {
+    const list = element('ul');
+    for (const rule of card.rules) {
+      const name = rule.categoryName || categories[rule.categoryId];
+      const line = element('li', name + ' — ' + rateAndLimit(rule));
+      if (rule.validFrom) line.append(element('div', ruleDetails(rule), 'muted'));
+      list.append(line);
+    }
+    entry.append(list);
+  } else {
+    entry.append(element('p', 'Действующих условий нет.', 'muted'));
+  }
+  if (card.updatedOn) entry.append(element('small', 'Условия от ' + card.updatedOn));
+  if (card.monthly) {
+    const monthly = element('details');
+    monthly.append(element('summary', 'Месячный лимит'), monthlyForm(card));
+    entry.append(monthly);
+  }
+  if (!card.cardName && card.rules.length) entry.append(rateForm(card));
+  if (action) entry.append(action);
+  return entry;
+}
+
+function cardAction(card, label, path, method, listId) {
+  const button = element('button', label, 'secondary');
+  button.type = 'button';
+  button.dataset.card = card.cardId;
+  button.setAttribute('aria-label', label + ': ' + (card.cardName || card.name));
+  button.onclick = async () => {
+    await updateCards(async () => {
+      await api(path + encodeURIComponent(card.cardId), {method});
+    });
+    const next = [...$(listId).querySelectorAll('button[data-card]')]
+      .find(item => item.dataset.card === card.cardId);
+    if (next) next.focus();
+    else if (listId === 'my-list' && !$('retry').hidden) $('retry').focus();
+    else if (listId === 'my-list') $('catalog').querySelector('summary').focus();
+  };
+  return button;
+}
+
+function renderCatalog() {
+  const category = $('catalog-category').value;
+  const entries = [];
+  for (const card of catalog) {
+    const rules = category ? card.rules.filter(rule => rule.categoryId === category) : card.rules;
+    if (category && !rules.length) continue;
+    const action = saved.has(card.cardId) ? 'Удалить' : 'Добавить';
+    const method = saved.has(card.cardId) ? 'DELETE' : 'PUT';
+    entries.push(cardListing({...card, rules}, cardAction(card, action, '/api/me/cards/', method, 'catalog-list')));
+  }
+  $('catalog-list').replaceChildren(...(entries.length ? entries : [element('p', 'Нет карт для этой категории.', 'muted')]));
+}
+
+function renderCards() {
+  const entries = catalog.filter(card => saved.has(card.cardId)).map(card =>
+    cardListing({...card, monthly:catalogBalances[card.cardId]}, cardAction(card, 'Удалить', '/api/me/cards/', 'DELETE', 'my-list'))
+  );
+  for (const card of manual) {
+    entries.push(cardListing(card, cardAction(card, 'Удалить', '/api/me/manual-cards/', 'DELETE', 'my-list')));
+  }
+  $('my-list').replaceChildren(...entries);
+  renderCategories();
+  renderCatalog();
+}
+
+async function updateCards(change, completion = '') {
+  if (busy) return;
+  busy = true;
+  compareEnabled();
+  if (change && $('scope').value === 'mine') clearResults();
+  $('retry').hidden = true;
+  $('cards-status').textContent = change ? 'Сохраняем…' : 'Загружаем карты…';
+  try {
+    if (change) await change();
+    const [groups, products, ids, personal, balances] = await Promise.all([
+      api('/api/category-groups'), api('/api/cards'), api('/api/me/cards'), api('/api/me/manual-cards'), api('/api/me/catalog-monthly')
+    ]);
+    categoryGroups = groups;
+    categories = Object.assign({}, ...Object.values(groups));
+    catalog = products;
+    saved = new Set(ids);
+    manual = personal;
+    catalogBalances = balances;
+    const purchaseCard = $('purchase-card'), previousCard = purchaseCard.value;
+    purchaseCard.replaceChildren(new Option('Не указана', ''), ...[
+      ...manual, ...catalog.filter(card => saved.has(card.cardId))
+    ].map(card => new Option(card.cardName || card.name, card.cardId)));
+    if ([...purchaseCard.options].some(option => option.value === previousCard)) purchaseCard.value = previousCard;
+    dataReady = true;
+    renderCards();
+    $('cards-status').textContent = completion ||
+      (saved.size || manual.length ? '' : 'Добавьте карту из каталога или введите свои условия.');
+  } catch (error) {
+    if (error.message === 'HTTP 422' && change) {
+      $('cards-status').textContent = '';
+    } else {
+      dataReady = false;
+      $('cards-status').textContent = 'Не удалось обновить карты. Повторите загрузку.';
+      $('retry').hidden = false;
+    }
+  } finally {
+    busy = false;
+    compareEnabled();
+  }
+}
+
+function searchKey(text) {
+  return text.normalize('NFKC').toLowerCase().replaceAll('ё', 'е').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+async function loadBankDirectory() {
+  try {
+    const {banks} = await api('/api/banks');
+    const featured = new Map(featuredBanks.map(bank => [bank.registrationNumber, bank]));
+    bankDirectory = banks.map(bank => ({...bank, ...featured.get(bank.registrationNumber)}));
+    bankDirectory.sort((left, right) => {
+      const byFeatured = Number(featured.has(right.registrationNumber)) - Number(featured.has(left.registrationNumber));
+      return byFeatured || left.name.localeCompare(right.name, 'ru');
+    });
+    bankDirectoryState = 'ready';
+  } catch {
+    bankDirectoryState = 'unavailable';
+  }
+  renderBankChoices();
+}
+
+function renderBankChoices() {
+  const query = searchKey($('bank-search').value);
+  const list = bankDirectory.filter(bank =>
+    [bank.name, bank.registeredName, bank.aliases, bank.registrationNumber].some(term => term && searchKey(term).includes(query)));
+  $('bank-options').replaceChildren(...list.slice(0, bankLimit).map(bank => {
+    const button = element('button', '', 'bank-tile secondary');
+    button.type = 'button';
+    const mark = element('span', bank.mark || bank.name.charAt(0).toUpperCase(), 'bank-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.style.setProperty('--mark-bg', bank.bg || '#e4ede8');
+    mark.style.setProperty('--mark-ink', bank.ink || '#182b27');
+    button.append(mark, element('span', bank.name));
+    button.onclick = () => selectBank(bank.name);
+    return button;
+  }));
+  const more = $('more-banks');
+  more.hidden = list.length <= bankLimit;
+  more.textContent = !query && bankLimit === featuredBanks.length
+    ? 'Все банки (' + list.length + ')' : 'Показать ещё';
+  $('bank-status').textContent = bankDirectoryState === 'loading' ? 'Загружаем справочник…'
+    : bankDirectoryState === 'unavailable' ? 'Справочник недоступен. Банк можно указать вручную.'
+    : !list.length ? 'Банк не найден. Его можно указать вручную.'
+    : query ? 'Найдено банков: ' + list.length : '';
+}
+
+function selectBank(name) {
+  $('bank-picker').hidden = true;
+  $('manual-form').hidden = false;
+  $('chosen-bank').textContent = name || 'Другой банк';
+  $('manual-bank-label').hidden = Boolean(name);
+  $('manual-bank').readOnly = Boolean(name);
+  $('manual-bank').value = name || '';
+  $('manual-name-label').hidden = Boolean(name);
+  $('manual-name').disabled = Boolean(name);
+  const next = name ? $('manual-rules').querySelector('[name=category]') : $('manual-bank');
+  next.focus();
+}
+
+function showBankPicker() {
+  $('manual-form').hidden = true;
+  $('bank-picker').hidden = false;
+  $('bank-search').value = '';
+  bankLimit = featuredBanks.length;
+  renderBankChoices();
+}
+
+function renderRuleChoices(row) {
+  const input = row.querySelector('[name=category]');
+  const target = row.querySelector('[data-category-choices]');
+  const query = searchKey(input.value);
+  const names = query ? Object.values(categories).filter(name => searchKey(name).includes(query))
+    : popularCategories.map(id => categories[id]).filter(Boolean);
+  target.replaceChildren(...names.filter(name => searchKey(name) !== query).slice(0, 6).map(name => {
+    const choice = element('button', name, 'category-choice secondary');
+    choice.type = 'button';
+    choice.onclick = () => {
+      input.value = name;
+      renderRuleChoices(row);
+      row.querySelector('[name=rate]').focus();
+    };
+    return choice;
+  }));
+  target.hidden = !target.childElementCount;
+}
+
+function addRow() {
+  const row = $('rule-template').content.firstElementChild.cloneNode(true);
+  row.querySelector('[name=category]').oninput = () => renderRuleChoices(row);
+  renderRuleChoices(row);
+  row.querySelector('[data-remove]').onclick = () => {
+    row.remove();
+    if (!$('manual-rules').children.length) addRow();
+    $('manual-rules').lastElementChild.querySelector('input').focus();
+  };
+  $('manual-rules').append(row);
+  return row;
+}
+async function loadAccount() {
+  try {
+    const {username} = await api('/api/auth/me');
+    $('account-status').textContent = username ? `Вы вошли: ${username}` : 'Гостевой режим. Войдите, чтобы видеть карты на других устройствах.';
+    $('account-form').hidden = Boolean(username);
+    $('logout').hidden = !username;
+    $('spending-guest').hidden = Boolean(username);
+    $('spending-content').hidden = !username;
+    if (username) await loadSpending();
+  } catch {
+    $('account-status').textContent = 'Не удалось проверить вход. Обновите страницу.';
+  }
+}
+let authBusy = false;
+async function changeAccount(path, payload) {
+  if (authBusy || busy) return;
+  authBusy = $('save-card').disabled = true;
+  try {
+    await api(`/api/auth/${path}`, {method:'POST', body:payload, timeout:30000});
+    $('password').value = '';
+    location.reload();
+  } catch (error) {
+    let message = 'Не удалось выполнить действие. Попробуйте снова.';
+    if (error.message === 'HTTP 401') message = 'Неверный логин или пароль.';
+    if (error.message === 'HTTP 429') message = 'Слишком много попыток. Подождите минуту.';
+    if (error.message === 'HTTP 409') message = 'Логин занят или вход уже выполнен.';
+    if (error.message === 'HTTP 422') message = 'Проверьте формат логина и длину пароля.';
+    $('account-status').textContent = message;
+    authBusy = false;
+    compareEnabled();
+  }
+}
+$('account-form').onsubmit = event => {
+  event.preventDefault();
+  const action = event.submitter?.value || 'login';
+  const payload = {username:$('username').value, password:$('password').value};
+  if (action === 'register') payload.transferGuestCards = $('transfer-guest').checked;
+  changeAccount(action, payload);
+};
+$('logout').onclick = () => changeAccount('logout', {});
+$('bank-search').oninput = () => {
+  bankLimit = $('bank-search').value.trim() ? bankPageSize : featuredBanks.length;
+  renderBankChoices();
+};
+$('more-banks').onclick = () => {
+  const firstNewIndex = bankLimit;
+  bankLimit += bankPageSize;
+  renderBankChoices();
+  $('bank-options').children[firstNewIndex]?.focus();
+};
+$('other-bank').onclick = () => selectBank();
+$('change-bank').onclick = () => {
+  showBankPicker();
+  $('bank-search').focus();
+};
+$('add-rule').onclick = () => addRow().querySelector('input').focus();
+$('retry').onclick = () => updateCards();
+$('catalog-category').onchange = renderCatalog;
+$('category').onchange = compareEnabled;
+$('scope').onchange = () => {
+  clearResults();
+  renderCategories();
+};
+
+$('manual-form').onsubmit = async event => {
+  event.preventDefault();
+  if (busy || authBusy || !dataReady) return;
+  const bankName = $('manual-bank').value.trim();
+  const name = $('manual-name').disabled ? bankName : $('manual-name').value.trim();
+  const rules = [];
+  const monthlyLimitKopecks = optionalAmount($('manual-monthly-cap'));
+  const monthlyUsedKopecks = optionalAmount($('manual-monthly-used'));
+  if ([monthlyLimitKopecks, monthlyUsedKopecks].some(Number.isNaN)) {
+    $('manual-status').textContent = 'Укажите неотрицательные суммы до 10 млрд ₽ с точностью до копейки.';
+    return;
+  }
+  if (!name || !bankName) {
+    $('manual-status').textContent = 'Укажите название карты и банк.';
+    return;
+  }
+  for (const row of $('manual-rules').children) {
+    const categoryName = row.querySelector('[name=category]').value.trim();
+    const rateBps = fixed(row.querySelector('[name=rate]').value);
+    const cap = row.querySelector('[name=cap]').value.trim();
+    const limitKopecks = cap ? fixed(cap) : null;
+    const minimum = row.querySelector('[name=minimum]').value.trim();
+    const minAmountKopecks = minimum ? fixed(minimum) : 0;
+    const start = row.querySelector('[name=start]').value;
+    const end = row.querySelector('[name=end]').value;
+    const problem = !categoryName ? 'укажите название категории.'
+      : !(rateBps >= 0 && rateBps <= 10000) ? 'кэшбэк должен быть от 0 до 100%, не более двух знаков после запятой.'
+      : !(minAmountKopecks >= 0 && minAmountKopecks <= 10**12) ? 'минимальная сумма должна быть от 0 до 10 млрд ₽, с точностью до копейки.'
+      : cap && !(limitKopecks >= 0 && limitKopecks <= 10**12) ? 'лимит должен быть от 0 до 10 млрд ₽, с точностью до копейки.'
+      : start && end && end <= start ? 'дата окончания должна быть позже даты начала.' : '';
+    if (problem) {
+      $('manual-status').textContent = `Строка ${rules.length + 1}: ${problem}`;
+      return;
+    }
+    rules.push({categoryName, rateBps, limitKopecks, minAmountKopecks,
+      ...(start ? {validFrom:start} : {}), validUntilExclusive:end || null});
+  }
+  $('manual-status').textContent = '';
+  await updateCards(async () => {
+    try {
+      await api('/api/me/manual-cards', {method: 'POST', body: {name, bankName, rules, monthlyLimitKopecks, monthlyUsedKopecks}});
+    } catch (error) {
+      $('manual-status').textContent = error.message === 'HTTP 422'
+        ? 'Проверьте условия. Категории на одной карте не должны повторяться.'
+        : 'Не удалось сохранить карту. Попробуйте ещё раз.';
+      throw error;
+    }
+    $('manual-form').reset();
+    showBankPicker();
+    $('manual-rules').replaceChildren();
+    addRow();
+    $('scope').value = 'mine';
+    clearResults();
+    $('manual-entry').open = false;
+    $('manual-entry').querySelector('summary').focus();
+  }, 'Карта сохранена.');
+};
+
+function bankActions(match) {
+  const actions = element('div', '', 'stack');
+  const access = match.bankAccess;
+  const web = element('a', 'Открыть ' + access.name + ' в браузере', 'outbound secondary');
+  web.href = access.webUrl;
+  web.target = '_blank';
+  web.rel = 'noopener noreferrer';
+  actions.append(web);
+  if (access.id !== 'tbank') return actions;
+  const details = element('details');
+  const body = element('div', '', 'stack');
+  const field = element('label', 'Ссылка T‑Pay от продавца');
+  const input = element('input');
+  input.type = 'url';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.maxLength = 512;
+  const message = element('p', '', 'muted');
+  message.setAttribute('role', 'status');
+  const pay = element('a', '', 'outbound');
+  pay.rel = 'noreferrer';
+  pay.hidden = true;
+  input.oninput = () => {
+    const link = input.value.trim();
+    const valid = /^https:\/\/o\.tbank\.ru\/tpay\/[A-Za-z0-9_-]{1,160}$/.test(link);
+    message.textContent = link && !valid ? 'Вставьте ссылку T‑Pay от продавца. Ссылки СБП здесь не подходят.' : '';
+    pay.hidden = !valid;
+    if (valid) pay.href = link;
+    else pay.removeAttribute('href');
+  };
+  pay.textContent = 'Перейти к оплате через T‑Pay';
+  field.append(input);
+  body.append(field, message, pay, element('small',
+    'Перед подтверждением проверьте магазин, сумму и карту списания на стороне Т‑Банка.'));
+  details.append(element('summary', 'Оплатить через T‑Pay'), body);
+  actions.append(details);
+  return actions;
+}
+
+function resultCard(match, winner = false) {
+  const entry = element('article', '', winner ? 'card winner' : 'card');
+  const details = element('details');
+  details.append(element('summary', 'Условия'),
+    element('p', ruleDetails(match), 'muted'));
+  const {amountKopecks, beforeLimitsKopecks, afterCategoryLimitKopecks} = match.calculation;
+  const steps = element('ol');
+  steps.append(element('li', money(amountKopecks) + ' × ' + match.rateBps / 100 +
+    '% = ' + money(beforeLimitsKopecks) + ' после округления до копеек'));
+  if (match.limitApplied) steps.append(element('li',
+    'После лимита на покупку: ' + money(afterCategoryLimitKopecks)));
+  if (match.monthlyLimitApplied) steps.append(element('li',
+    'После месячного лимита: ' + money(match.cashbackKopecks)));
+  details.append(element('h4', 'Как рассчитан кэшбэк'), steps);
+  const monthly = match.monthlyBalanceStatus === 'known' ? `Известный месячный остаток: ${money(match.monthlyRemainingKopecks)}`
+    : match.monthlyBalanceStatus === 'assumed_full' ? `Остаток неизвестен: использован полный лимит ${money(match.monthlyLimitKopecks)}`
+    : match.monthlyBalanceStatus === 'not_set' ? 'Общий лимит не задан; месячный остаток не учтён.'
+    : 'Личные лимиты каталога в этом расчёте не учитываются.';
+  const issuer = match.bankName === match.cardName ? '' : match.bankName + ' · ';
+  entry.append(
+    element('h3', (winner ? 'Лучший выбор · ' : '') + match.cardName),
+    element('p', money(match.cashbackKopecks) + ' кэшбэка', 'return'),
+    element('p', issuer + rateAndLimit(match) +
+      (match.monthlyLimitApplied ? ' · применён месячный лимит' : match.limitApplied ? ' · лимит категории сработал' : ''), 'muted'),
+    element('small', monthly),
+    details
+  );
+  if (winner && match.bankAccess &&
+      (saved.has(match.cardId) || manual.some(card => card.cardId === match.cardId))) {
+    entry.append(bankActions(match));
+  }
+  return entry;
+}
+
+function purchaseAction(amount, category) {
+  const button = element('button', 'Записать эту покупку', 'secondary');
+  button.type = 'button';
+  button.onclick = () => {
+    $('purchase-date').value = new Date().toISOString().slice(0, 10);
+    $('purchase-amount').value = amount;
+    $('purchase-category').value = category;
+    $('purchase-merchant').value = '';
+    $('purchase-card').value = '';
+    $('purchase-status').textContent = '';
+    $('purchase-entry').open = true;
+    $('purchase-amount').focus();
+  };
+  return button;
+}
+
+$('calc').oninput = clearResults;
+$('calc').onsubmit = async event => {
+  event.preventDefault();
+  if ($('compare').disabled) return;
+  clearResults();
+  const current = version;
+  const amountKopecks = fixed($('amount').value);
+  if (!(amountKopecks > 0 && amountKopecks <= 10**12)) {
+    $('status').textContent = 'Введите сумму больше нуля и не более 10 млрд ₽, до двух знаков после запятой.';
+    $('amount').focus();
+    return;
+  }
+  const selected = $('category').value;
+  const categoryName = $('category').selectedOptions[0].textContent;
+  const amountText = $('amount').value;
+  const custom = selected.startsWith('manual:');
+  const categoryId = custom ? selected.slice('manual:'.length) : selected;
+  const scope = custom ? 'manual' : $('scope').value;
+  $('status').textContent = 'Считаем…';
+  try {
+    const {top3, allMatches, catalogSuggestion} = await api('/api/recommendations', {
+      method: 'POST', body: {categoryId, amountKopecks, scope}
+    });
+    if (current !== version) return;
+    if (!top3.some(match => match.cashbackKopecks > 0)) {
+      if (scope === 'all') {
+        $('status').textContent = 'В каталоге нет карт с кэшбэком за эту покупку.';
+      } else {
+        $('status').textContent = saved.size || manual.length
+          ? 'По вашим картам нет кэшбэка за эту покупку.'
+          : 'У вас пока нет добавленных карт.';
+        if (catalogSuggestion) {
+          $('results').append(element('h2', 'Подходящая карта из каталога'),
+            resultCard(catalogSuggestion),
+            element('small', 'Учебная карта. Условия приведены для демонстрации.'));
+        } else {
+          $('results').append(element('p', 'В каталоге тоже нет карт с кэшбэком за эту покупку.', 'muted'));
+        }
+      }
+      if (!$('spending-content').hidden) $('results').append(purchaseAction(amountText, categoryName));
+      return;
+    }
+    $('status').textContent = 'Лучший выбор — ' + top3[0].cardName +
+      '. Ожидаемый кэшбэк ' + money(top3[0].cashbackKopecks) + '.';
+    $('results').append(...top3.map((match, index) => resultCard(match, index === 0)));
+    if (allMatches.length > top3.length) {
+      const full = element('details', '', 'panel');
+      const list = element('div', '', 'stack');
+      list.append(...allMatches.map(match => resultCard(match)));
+      full.append(element('summary', 'Все подходящие карты (' + allMatches.length + ')'), list);
+      $('results').append(full);
+    }
+    $('results').append(element('small', scope === 'all'
+      ? 'Условия каталога учебные. Личные лимиты в этом режиме не учитываются.' : 'Расчёт не списывает остаток.'));
+    if (!$('spending-content').hidden) $('results').append(purchaseAction(amountText, categoryName));
+  } catch {
+    if (current === version) $('status').textContent = 'Не удалось получить расчёт. Попробуйте ещё раз.';
+  }
+};
+
+const utcToday = new Date().toISOString().slice(0, 10);
+$('purchase-date').value = $('purchase-date').max = utcToday;
+$('spending-month').value = $('spending-month').max = utcToday.slice(0, 7);
+let reportVersion = 0;
+
+async function loadSpending(openHistory = false, drafts = new Map()) {
+  const current = ++reportVersion, month = $('spending-month').value;
+  const target = $('spending-report'), status = $('spending-status');
+  target.replaceChildren();
+  status.textContent = month ? 'Загружаем отчёт…' : 'Выберите месяц.';
+  if (!month) return;
+  try {
+    const report = await api('/api/me/spending?month=' + encodeURIComponent(month));
+    if (current !== reportVersion) return;
+    status.textContent = report.count ? '' : 'За этот месяц пока нет покупок.';
+    if (!report.count) return;
+    const largest = report.largestPurchase;
+    target.append(element('h3', 'Всего: ' + money(report.totalKopecks)),
+      element('p', `Покупок: ${report.count}. Крупнейшая: ${money(largest.amountKopecks)} — ${largest.merchant || largest.categoryName}, ${largest.date}.`));
+    target.append(element('p', report.actualCashbackCount
+      ? 'Фактический кэшбэк по покупкам этого месяца: ' + money(report.actualCashbackKopecks) +
+        ' · заполнено покупок: ' + report.actualCashbackCount + ' из ' + report.count
+      : 'Начисления пока не указаны.'));
+    for (const [title, items, amount] of [
+      ['Расходы по категориям', report.byCategory, 'amountKopecks'],
+      ['Расходы по магазинам', report.byMerchant, 'amountKopecks'],
+      ['Расходы по использованным картам', report.byUsedCard, 'amountKopecks'],
+      ['Какая карта дала бы больше кэшбэка', report.cardRanking, 'estimatedKopecks']
+    ]) {
+      const section = element('article', '', 'card'), list = element('ol');
+      section.append(element('h3', title));
+      for (const item of items) list.append(element('li', item.name + ' — ' + money(item[amount])));
+      section.append(items.length ? list : element('p', 'Нет данных.', 'muted'));
+      if (amount === 'estimatedKopecks') section.append(element('small',
+        'Оценка оплаты всех записанных покупок одной картой: по сохранённым условиям и общему лимиту за месяц. Это не начисления банка; незаписанные покупки не учитываются.'));
+      target.append(section);
+    }
+    const history = element('details', '', 'panel');
+    history.open = openHistory === true;
+    history.append(element('summary', 'Журнал покупок'), element('small',
+      'Сравнение для каждой покупки отдельно, по сохранённым условиям. Месячный остаток не учитывается.'));
+    for (const purchase of report.purchases) {
+      const row = element('div', '', 'card');
+      row.append(element('p', `${purchase.date} · ${purchase.merchant || 'Место не указано'} · ${purchase.categoryName} · ${money(purchase.amountKopecks)}${purchase.cardName ? ' · ' + purchase.cardName : ''}`));
+      const {usedCardCashbackKopecks, bestCardName, bestCashbackKopecks, differenceKopecks} = purchase.cashbackComparison;
+      if (usedCardCashbackKopecks !== null) {
+        row.append(element('p', 'По использованной карте: ' + money(usedCardCashbackKopecks)));
+      } else if (purchase.cardName) {
+        row.append(element('p', 'Для использованной карты нет сохранённого расчёта.', 'muted'));
+      }
+      if (bestCardName && (differenceKopecks === null || differenceKopecks > 0)) {
+        row.append(element('p', 'Лучший вариант: ' + bestCardName + ' · ' + money(bestCashbackKopecks)));
+      }
+      if (differenceKopecks > 0) {
+        row.append(element('p', 'Можно было бы вернуть на ' + money(differenceKopecks) + ' больше.'));
+      } else if (differenceKopecks === 0) {
+        row.append(element('p', 'Использованная карта дала бы максимальный возврат.'));
+      }
+      const form = element('form', '', 'stack');
+      const label = element('label', 'Фактически начислено, ₽');
+      const input = element('input');
+      input.inputMode = 'decimal';
+      input.dataset.cashbackPurchase = purchase.id;
+      input.defaultValue = purchase.actualCashbackKopecks === null ? '' : String(purchase.actualCashbackKopecks / 100);
+      input.value = drafts.get(purchase.id) ?? input.defaultValue;
+      input.placeholder = 'Пусто — неизвестно';
+      label.append(input);
+      const save = element('button', 'Сохранить начисление', 'secondary');
+      const message = element('p');
+      message.setAttribute('role', 'status');
+      form.append(label, save, message);
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const amountKopecks = optionalAmount(input);
+        if (Number.isNaN(amountKopecks)) {
+          message.textContent = 'Введите сумму от нуля до 10 млрд ₽.';
+          return;
+        }
+        save.disabled = true;
+        try {
+          await api('/api/me/purchases/' + encodeURIComponent(purchase.id) + '/cashback',
+            {method:'PUT', body:{amountKopecks}});
+          const unsaved = [...target.querySelectorAll('[data-cashback-purchase]')]
+            .filter(field => field !== input && field.value !== field.defaultValue)
+            .map(field => [field.dataset.cashbackPurchase, field.value]);
+          if ($('spending-month').value === month) await loadSpending(true, new Map(unsaved));
+        } catch {
+          message.textContent = 'Не удалось сохранить начисление.';
+          save.disabled = false;
+        }
+      };
+      row.append(form);
+      const remove = element('button', 'Удалить', 'secondary');
+      remove.type = 'button';
+      remove.onclick = async () => {
+        if (!confirm('Удалить эту покупку из журнала?')) return;
+        remove.disabled = true;
+        try {
+          await api('/api/me/purchases/' + encodeURIComponent(purchase.id), {method:'DELETE'});
+          await loadSpending();
+        } catch {
+          status.textContent = 'Не удалось удалить покупку.';
+          remove.disabled = false;
+        }
+      };
+      row.append(remove);
+      history.append(row);
+    }
+    target.append(history);
+  } catch {
+    if (current === reportVersion) status.textContent = 'Не удалось загрузить отчёт. Проверьте вход или выберите месяц снова.';
+  }
+}
+$('spending-month').onchange = loadSpending;
+$('purchase-entry').ontoggle = () => {
+  if (!$('purchase-entry').open) return;
+  const category = $('category').selectedOptions[0];
+  if (!$('purchase-category').value && category?.value) $('purchase-category').value = category.textContent;
+  if (!$('purchase-amount').value) $('purchase-amount').value = $('amount').value;
+};
+let pendingPurchase;
+$('purchase-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = $('purchase-form').querySelector('button'), status = $('purchase-status');
+  const date = $('purchase-date').value, amountKopecks = fixed($('purchase-amount').value);
+  if (button.disabled || authBusy) return;
+  if (!(amountKopecks > 0 && amountKopecks <= 10**12)) {
+    status.textContent = 'Введите сумму больше нуля, с точностью до копейки.';
+    return;
+  }
+  button.disabled = true;
+  status.textContent = 'Сохраняем…';
+  try {
+    const body = {date, amountKopecks, categoryName:$('purchase-category').value,
+      merchant:$('purchase-merchant').value, cardId:$('purchase-card').value || null};
+    const fingerprint = JSON.stringify(body);
+    if (pendingPurchase?.fingerprint !== fingerprint) {
+      const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+        n => n.toString(16).padStart(2, '0')).join('');
+      pendingPurchase = {fingerprint, nonce};
+    }
+    await api('/api/me/purchases', {method:'POST', body, headers:{'Idempotency-Key':pendingPurchase.nonce}});
+    pendingPurchase = undefined;
+    $('purchase-form').reset();
+    $('purchase-date').value = utcToday;
+    $('purchase-entry').open = false;
+    $('purchase-entry').querySelector('summary').focus();
+    $('spending-month').value = date.slice(0, 7);
+    status.textContent = '';
+    await loadSpending();
+  } catch (error) {
+    status.textContent = error.message === 'HTTP 422'
+      ? 'Проверьте дату, категорию и выбранную карту.' : 'Не удалось сохранить покупку.';
+  } finally {
+    button.disabled = false;
+  }
+};
+
+renderBankChoices();
+loadBankDirectory();
+addRow();
+updateCards();
+loadAccount();
+</script>
+</body>
+</html>
