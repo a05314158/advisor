@@ -17,6 +17,7 @@ from bank_links import bank_access
 from observability import mount_observability
 from spending import mount_spending
 PAGE = Path(__file__).with_name('index.html')
+ANDROID_TEST_PAGE = Path(__file__).with_name('android-bank-test.html')
 BANKS = Path(__file__).with_name('banks_ru.json')
 BUILD_REVISION = '$Format:%H$'
 CATEGORY_IDS = {label.casefold(): category_id for category_id, label in CATEGORIES.items()}
@@ -160,6 +161,10 @@ def create_app(db_path):
     @app.get('/')
     def home():
         return HTMLResponse(app.state.html, headers={'Cache-Control': 'no-store'})
+
+    @app.get('/android-bank-test', include_in_schema=False)
+    def android_bank_test():
+        return HTMLResponse(ANDROID_TEST_PAGE.read_bytes(), headers={'Cache-Control': 'no-store'})
 
     @app.get('/healthz')
     def health():
