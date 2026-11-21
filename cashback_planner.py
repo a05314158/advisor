@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from catalog import connect
+from catalog import connect, wallet_purchase_table
 
 
 MAX_RECEIPTS = 1000
@@ -267,7 +267,7 @@ def mount_planner(app, db_path, require_user):
             db.execute('BEGIN')
             if not manual:
                 last = calendar.monthrange(int(source[:4]), int(source[-2:]))[1]
-                receipts = db.execute('''SELECT category_id,amount_kopecks FROM purchases
+                receipts = db.execute(f'''SELECT category_id,amount_kopecks FROM {wallet_purchase_table(db)}
                     WHERE session=? AND bought_on BETWEEN ? AND ? ORDER BY bought_on,rowid LIMIT ?''',
                     (session,source+'-01',f'{source}-{last}',MAX_RECEIPTS+1)).fetchall()
             rows = db.execute('''SELECT card_id,bank_id,mode,slots,rules_json FROM cashback_sets

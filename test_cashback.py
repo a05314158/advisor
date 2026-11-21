@@ -226,3 +226,56 @@ class Cashback(unittest.TestCase):
         initialize(legacy)
         with connect(legacy) as db:
             self.assertEqual(db.execute('SELECT login FROM users').fetchall(), [('old',)])
+
+    def test_edit_rate_preserves_monthly_limit_and_never_changes_public_catalog(self):
+        confirmed = self.confirm()
+        card = confirmed.json()['cardId']
+        limits = f'/api/me/cards/{card}/monthly'
+        rates = f'/api/me/manual-cards/{card}/rate'
+        config = {'limitKopecks': 5000, 'usedKopecks': 3500}
+        rank = dict(scope='mine', amountKopecks=50000, categoryId='Такси')
+        public = dict(scope='all', amountKopecks=250000, categoryId='supermarkets')
+        old_catalog = self.client.post('/api/recommendations', public).json()
+        self.assertEqual(self.client._request('PUT', limits, config).json()['remainingKopecks'], 1500)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 1500)
+        change = {'categoryId': 'Такси', 'label': 'Такси', 'rateBps': 200}
+        self.assertEqual(self.client._request('PATCH', rates, change).status_code, 204)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 1000)
+        self.assertEqual(self.client.get(limits).json(), dict(month=MONTH, remainingKopecks=1500, **config))
+        self.assertEqual(self.client.post('/api/recommendations', public).json(), old_catalog)
+        with API(self.app) as other:
+            self.login(other, 'another_owner')
+            self.assertEqual(other.get(limits).status_code, 404)
+            self.assertEqual(other._request('PATCH', rates, change).status_code, 404)
+        self.assertEqual(self.client._request('PUT', limits, {**config, 'usedKopecks':5000}).status_code, 200)
+        self.assertEqual(self.client.post('/api/recommendations', rank).json()['top3'][0]['cashbackKopecks'], 0)
+
+    def test_wallet_journal_on_database_from_previous_release(self):
+        legacy = self.path.with_suffix('.staging')
+        with connect(legacy) as db:
+            db.executescript('''
+                CREATE TABLE purchases (
+                    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, day TEXT NOT NULL,
+                    category TEXT NOT NULL, merchant TEXT NOT NULL, amount INTEGER NOT NULL,
+                    used_card TEXT, estimates TEXT NOT NULL
+                );
+                INSERT INTO purchases VALUES
+                    ('classic-1','old-owner','2026-11-10','Еда','Магазин',60000,NULL,'{}');
+            ''')
+        initialize(legacy)
+        with API(create_app(legacy)) as client:
+            self.login(client, 'next_wallet')
+            card = client.post('/api/me/manual-cards', json={
+                'name': 'СберБанк', 'rules': [{'categoryId': 'fuel', 'rateBps': 400}],
+            }).json()['cardId']
+            purchase = client.post('/api/me/purchases', json={
+                'chosenCardId': card, 'categoryId': 'fuel', 'amountKopecks': 25_000,
+            })
+            self.assertEqual(purchase.status_code, 201, purchase.text)
+            self.assertEqual(client.get('/api/me/stats').json()['calculatedKopecks'], 1000)
+            plan = client.post('/api/me/cashback-plan', json={'month': MONTH, 'spendingMonth': MONTH})
+            self.assertEqual(plan.status_code, 200, plan.text)
+        initialize(legacy)
+        with connect(legacy) as db:
+            self.assertEqual(db.execute('SELECT id, amount FROM purchases').fetchall(), [('classic-1', 60_000)])
+            self.assertEqual(db.execute('SELECT amount_kopecks FROM wallet_purchases').fetchall(), [(25_000,)])
