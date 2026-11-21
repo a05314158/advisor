@@ -36,6 +36,24 @@ BANKS = (
     ('unicredit', 'ЮниКредит Банк', '#D8DCE3', '#161616', ''),
 )
 
+_BANK_LOGO_DIR = Path(__file__).parent / 'static' / 'banks'
+REGISTRY_LOGO_BY_NUMBER = {
+    '101': 'bcs',
+    '1927': 'modulbank',
+    '3251': 'psb',
+    '3354': 'rencap',
+    '3027': 'yandex',
+}
+
+
+def bank_logo_url(logo_id):
+    if not logo_id:
+        return None
+    for suffix in ('.png', '.svg', '.webp'):
+        if (_BANK_LOGO_DIR / f'{logo_id}{suffix}').is_file():
+            return f'/static/banks/{logo_id}{suffix}'
+    return None
+
 
 @lru_cache(maxsize=1)
 def registry_banks():
@@ -53,11 +71,24 @@ def bank_names():
 
 
 def bank_public():
-    featured = [{'id': bank[0], 'name': bank[1], 'color': bank[2], 'ink': bank[3], 'accent': bank[4]}
-                for bank in BANKS]
-    registry = [{'id': 'cbr-' + bank['registrationNumber'], 'name': bank['name'],
-                 'registrationNumber': bank['registrationNumber']}
-                for bank in registry_banks() if bank['registrationNumber'] not in BRANDED_REGISTRATION_NUMBERS]
+    featured = []
+    for bank in BANKS:
+        row = {'id': bank[0], 'name': bank[1], 'color': bank[2], 'ink': bank[3], 'accent': bank[4]}
+        logo = bank_logo_url(bank[0])
+        if logo:
+            row['logo'] = logo
+        featured.append(row)
+    registry = []
+    for bank in registry_banks():
+        if bank['registrationNumber'] in BRANDED_REGISTRATION_NUMBERS:
+            continue
+        row = {'id': 'cbr-' + bank['registrationNumber'], 'name': bank['name'],
+               'registrationNumber': bank['registrationNumber']}
+        logo_id = REGISTRY_LOGO_BY_NUMBER.get(bank['registrationNumber'])
+        logo = bank_logo_url(logo_id)
+        if logo:
+            row['logo'] = logo
+        registry.append(row)
     return featured + registry
 SEED = [dict(cardId=c, categoryId=k, rateBps=r, limitKopecks=l, minAmountKopecks=m,
              validFrom='2026-11-01', validUntilExclusive='2027-11-01', updatedOn='2026-11-01')
@@ -122,6 +153,10 @@ def setup(db):
         CREATE TABLE IF NOT EXISTS wallet_monthly_usage (
           session TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL, used_kopecks INTEGER,
           PRIMARY KEY(session, card_id, month)
+        );
+        CREATE TABLE IF NOT EXISTS purchase_cashback (
+          purchase_id INTEGER PRIMARY KEY,
+          amount INTEGER NOT NULL
         );
     ''')
     db.execute(f'''

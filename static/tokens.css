@@ -36,6 +36,7 @@
   --muted: #5d5a51;
   --line: #ded9cb;
   --accent: #ffdd2d;
+  --accent-ink: #1d1e1a;
   --yellow: #ffdd2d;
   --sun: #ffdd2d;
   --graphite: #171817;
@@ -78,6 +79,8 @@ html[data-theme="dark"] {
   --graphite: #0e0f0c;
   --graphite-ink: #f5f3ea;
   --card: #0e0f0c;
+  --danger: #ff8f8a;
+  --red: #ff8f8a;
   --shadow: 0 18px 40px rgba(0, 0, 0, .35);
 }
 
@@ -87,4 +90,59 @@ html, body, button, input, select, textarea {
 
 .money, .tabular, .journal-money, .stat-primary strong, .carousel-position, .buy-amount, .advice-value {
   font-variant-numeric: tabular-nums;
+}
+
+/* Жёлтые primary-кнопки: текст всегда тёмный (в dark --ink светлый). */
+:is(
+  #openBuy,
+  .add-button,
+  .card-cashback-btn,
+  .account-primary-btn,
+  .buy-primary,
+  #buyResults .pick,
+  .calculate,
+  #addRouteBank,
+  #addDialog .confirm,
+  .dialog-actions .confirm,
+  #discardDialog .confirm,
+  .cashback-dialog button.confirm:not(:disabled),
+  .auth-form #authSubmit,
+  #sessionGateRetry,
+  .home-actions button:not(.ghost),
+  #addCardForm .confirm,
+  #planForm .confirm,
+  #confirmCard,
+  #saveReview
+) {
+  color: var(--accent-ink);
+}
+
+html[data-theme=dark] :is(
+  #openBuy,
+  .add-button,
+  .card-cashback-btn,
+  .account-primary-btn,
+  .buy-primary,
+  #buyResults .pick,
+  .calculate,
+  #addRouteBank,
+  #addDialog .confirm,
+  .dialog-actions .confirm,
+  #discardDialog .confirm,
+  .cashback-dialog button.confirm:not(:disabled),
+  .auth-form #authSubmit,
+  #sessionGateRetry,
+  .home-actions button:not(.ghost),
+  #addCardForm .confirm,
+  #planForm .confirm,
+  #confirmCard,
+  #saveReview,
+  .catalog-confirm .review-footer .confirm.is-ready
+) {
+  color: var(--accent-ink);
+  text-shadow: none;
+}
+
+html[data-theme=dark] #accountPanel #showStatsBtn.account-primary-btn {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .28);
 }

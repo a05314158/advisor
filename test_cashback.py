@@ -69,6 +69,19 @@ class Cashback(unittest.TestCase):
                     rules=[rule()] if rules is None else rules)
         return self.client.post('/api/me/cashback-confirm', json={**body, **fields})
 
+    def test_draft_strips_second_line_tile_hints(self):
+        model = {'rules': [
+            {'label': 'За все покупки', 'ratePercent': 2, 'selected': True},
+            {'label': 'Вкусно — и точка', 'ratePercent': 15, 'selected': True},
+            {'label': 'Для молодёжи', 'selected': True},
+            {'label': 'Альфа-Тревел', 'ratePercent': 3, 'selected': True},
+            {'label': 'Дополняет сервисный', 'selected': True},
+        ]}
+        parsed = parse_rules(json.dumps(model))
+        self.assertEqual(len(parsed), 3)
+        self.assertEqual({r['label'] for r in parsed},
+                         {'За все покупки', 'Вкусно — и точка', 'Альфа-Тревел'})
+
     def test_draft_never_writes_and_keeps_distinct_labels(self):
         model = {'month': MONTH, 'rules': [dict(label=name, categoryId='transport', ratePercent=rate, selected=sel)
                                          for name, rate, sel in [('Такси', 5, True), ('Транспорт', 3, False), ('Метро', 4, None)]]}
@@ -176,6 +189,16 @@ class Cashback(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/logout').status_code, 204)
         self.assertFalse(self.client.get('/api/auth/me').json()['authenticated'])
         self.assertEqual(self.client.get('/api/me/stats').status_code, 401)
+
+    def test_auth_guest(self):
+        guest = API(self.app)
+        self.addCleanup(guest.close)
+        created = guest.post('/api/auth/guest')
+        self.assertEqual(created.status_code, 201)
+        body = created.json()
+        self.assertTrue(body.get('guest'))
+        self.assertTrue(body.get('login', '').startswith('g'))
+        self.assertTrue(guest.get('/api/auth/me').json()['authenticated'])
 
     def test_monthly_provenance_and_slot_cap(self):
         card = self.confirm(slots=1, rules=[rule('Кино', 'Кино')]).json()['cardId']

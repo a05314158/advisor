@@ -10,6 +10,11 @@ from catalog import CATEGORIES, bank_names
 
 MAX_AMOUNT = 10**12
 MAX_ROWS = 128
+_TILE_SUBTITLE = re.compile(
+    r'^(для молод(ё|е)жи|дополняет\b.+|подходит\b.+|только для\b.+|в рамках\b.+)$',
+    re.I,
+)
+_TILE_SUBTITLE_PREFIX = re.compile(r'^(Для|Дополняет|Подходит|Только|В рамках)\b', re.I)
 
 
 class Invalid(ValueError):
@@ -56,6 +61,22 @@ def scaled(value, percent=False):
     return int(Decimal(raw) * 100)
 
 
+def omit_tile_subtitle_lines(rules):
+    """Drop second-line hints OCR often splits off the same bank tile (e.g. «Для молодёжи»)."""
+    kept = []
+    for rule in rules:
+        label = (rule.get('label') or '').strip()
+        if rule.get('rateBps') is None and _TILE_SUBTITLE.match(label):
+            continue
+        if (rule.get('rateBps') is None and len(label) <= 48
+                and _TILE_SUBTITLE_PREFIX.match(label)):
+            continue
+        kept.append(rule)
+    if not kept:
+        raise ValueError('no rules')
+    return kept
+
+
 def parse_draft(content):
     if not isinstance(content, str):
         raise ValueError('empty')
@@ -100,6 +121,7 @@ def parse_draft(content):
                           uncertain=uncertain or rate is None or minimum is None))
     if not rules:
         raise ValueError('no rules')
+    rules = omit_tile_subtitle_lines(rules)
     month = data.get('month') if isinstance(data, dict) else None
     return {'rules': rules, **({'month': month} if month_ok(month) else {})}
 

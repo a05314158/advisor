@@ -6,7 +6,14 @@
   let draftEpoch = 0, planEpoch = 0, busy = false, dirty = false, planDirty = false;
   let mode, target, replay, image = '', origin, planOrigin, source, suggestedMonth;
   const node = (tag,text,cls) => { const el=document.createElement(tag); if(text!=null) el.textContent=text; if(cls) el.className=cls; return el; };
-  function setCatalogBusy(on){busy=!!on; const layer=$('catalogBusy'); if(layer) layer.hidden=!on; review.classList.toggle('is-busy',!!on);}
+  function setCatalogBusy(on){
+    busy=!!on;
+    const layer=$('catalogBusy');
+    if(layer) layer.hidden=!on;
+    review.classList.toggle('is-busy',!!on);
+    review.setAttribute('aria-busy', on?'true':'false');
+    if(!on && !$('reviewForm').hidden) updateReviewFooter();
+  }
   function reviewEditSummary(){const summary=node('summary',null,'review-edit-toggle'); summary.setAttribute('aria-label','Изменить'); summary.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 20h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; return summary;}
   const action = (label,fn) => {const el=node('button',label); el.type='button'; el.onclick=fn; return el;};
   const bankName = id => banks.find(b=>b.id===id)?.name || id;
@@ -17,8 +24,10 @@
   const offerKey = (card,month) => JSON.stringify([deviceLogin,card,month]);
   const messages = {401:'Сессия закончилась. Войдите снова.',403:'Нет доступа к этой карте.',404:'Карта не найдена. Обновите кошелёк.',409:'Условия изменились. Проверьте карту.',422:'Проверьте месяц и значения в строках.',429:'Слишком много запросов. Повторите позже.',502:'Распознавание недоступно. Введите условия вручную или повторите позже.'};
   function fail(error,out) {
-    out.textContent = (error.status && !['Не удалось выполнить запрос.','Проверьте введённую сумму.'].includes(error.message) ? error.message : messages[error.status]) || (error.name==='TimeoutError'?'Сервер не ответил вовремя. Повторите запрос.':error.message);
-    if(error.status===401){toast(messages[401]); clearShot(); invalidatePlan(); dirty=planDirty=false; review.hidden=planner.hidden=true; sessionOffers.clear(); $('reviewRows').replaceChildren(); deviceLogin=null; $('appScreen').hidden=true; $('authScreen').hidden=false; showRemembered();}
+    setCatalogBusy(false);
+    const text=error?.message||(error?.status&&messages[error.status])||(error?.name==='TimeoutError'?'Сервер не ответил вовремя. Повторите запрос.':'Не удалось выполнить запрос. Повторите.');
+    out.textContent=text;
+    if(error.status===401){toast(messages[401]); clearShot(); invalidatePlan(); dirty=planDirty=false; review.hidden=planner.hidden=true; sessionOffers.clear(); $('reviewRows').replaceChildren(); if(window.expireSession) window.expireSession(); else {deviceLogin=null; $('appScreen').hidden=true; $('authScreen').hidden=true; $('welcomeScreen').hidden=false;}}
   }
   function invalidatePlan(){++planEpoch; $('planResult').replaceChildren(); $('planError').textContent=''; $('calculatePlan').disabled=false; const forecast=$('planForecast'); if(forecast){forecast.hidden=true; forecast.textContent='';}}
   function clearShot(){++draftEpoch; image=''; $('cashbackShot').value=''; $('shotPreview').textContent='Снимок из банка · JPG, PNG или WebP'; $('confirmCard').disabled=true; $('confirmCard').textContent='Прочитать снимок'; $('shotError').textContent='';}
@@ -86,8 +95,11 @@
   function clearFileState(){++draftEpoch; image=''; $('confirmCard').disabled=true; $('confirmCard').textContent='Прочитать снимок'; $('shotError').textContent='';}
   $('screenshotForm').onsubmit=async e=>{e.preventDefault(); if(!image || $('confirmCard').disabled)return; const token=++draftEpoch;
     $('confirmCard').disabled=true; setCatalogBusy(true); $('shotError').textContent='';
-    try{const data=await post('cashback-screenshot',{...target,image},45000); if(token===draftEpoch)startReview(data.rules,data.month,null,'shot');}
-    catch(err){if(token===draftEpoch)fail(err,$('shotError'));} finally{if(token===draftEpoch){$('confirmCard').disabled=false; setCatalogBusy(false);}}
+  try{
+      const data=await post('cashback-screenshot',{...target,image},45000);
+      if(token===draftEpoch)startReview(data.rules,data.month,null,'shot');
+    }catch(err){if(token===draftEpoch)fail(err,$('shotError'));}
+    finally{if(token===draftEpoch)$('confirmCard').disabled=false; setCatalogBusy(false);}
   };
   $('manualDraft').onclick=async()=>{if(!(await mayDiscard()))return; startReview([{}],suggestedMonth || monthAt(mode==='offer'?1:0),null,'manual');};
   function labelled(parent,title,control,cls){const label=node('label',title,cls); label.append(control); parent.append(label); return control;}
@@ -119,8 +131,16 @@
     if(!$('reviewMonth').value) needs.push('укажите месяц');
     if(!selected) needs.push('отметьте категорию');
     if(needRate) needs.push('укажите ставку');
-    if($('reviewNeed')) $('reviewNeed').textContent=needs.length?'Нужно: '+needs.join(', '):'';
-    $('saveReview').disabled=!!needs.length || busy;
+    const ready=!needs.length && !busy;
+    const need=$('reviewNeed');
+    if(need){
+      need.textContent=needs.length?'Нужно: '+needs.join(', '):'';
+      need.hidden=compact && !needs.length;
+    }
+    const save=$('saveReview');
+    save.disabled=!ready;
+    save.classList.toggle('is-ready', ready);
+    save.setAttribute('aria-disabled', ready?'false':'true');
   }
   function canCompactReview(rules){
     return mode==='active' && rules.length>0;
@@ -200,11 +220,14 @@
     const bank=bankName(target.bankId);
     const same=bank===cardLabel || cardLabel.startsWith(bank+' ');
     $('reviewContext').textContent=same?cardLabel:`${bank} · ${cardLabel}`;
+    const compactReview=canCompactReview(rules);
+    if(!month && mode==='active') month=monthAt(0);
+    else if(!month && mode==='offer') month=monthAt(1);
     $('reviewMonth').value=month || ''; $('reviewMonth').disabled=kind==='plan'; syncMonthText();
     $('reviewSlots').value=slots??''; $('reviewSlots').max=128; $('reviewSlots').disabled=kind==='plan' && slots!=null;
     const slotsWrap=$('reviewSlotsLabel'); if(slotsWrap) slotsWrap.hidden=active;
     if($('reviewWarnings')){ $('reviewWarnings').hidden=true; $('reviewWarnings').textContent=''; }
-    const compact=canCompactReview(rules);
+    const compact=compactReview;
     $('reviewForm').dataset.density=compact?'compact':'full';
     if($('addRule')) $('addRule').hidden=compact;
     const hint=$('reviewHint');
@@ -218,6 +241,7 @@
   if(compact && month){ $('reviewMonth').classList.add('is-collapsed'); } else { $('reviewMonth')?.classList.remove('is-collapsed'); }
     $('saveReview').textContent=compact?'Сохранить':'Сохранить категории';
     rules.forEach(rule=> compact?compactRow(rule):row(rule));
+    setCatalogBusy(false);
     updateReviewFooter();
     showStep('reviewForm',compact?'Всё верно?':'Проверьте категории', month?'reviewMonthText':'reviewMonth');
   }
@@ -234,22 +258,26 @@
     if(!rules.length)throw new Error('Отметьте хотя бы одну проверенную строку.');
     const body={...target,month:$('reviewMonth').value,mode,slots:$('reviewSlots').value===''?null:Number($('reviewSlots').value),rules};
     const signature=JSON.stringify(body); if(replay?.signature!==signature)replay={signature,key:newKey()};
-    setCatalogBusy(true); $('saveReview').disabled=true; $('reviewForm').inert=true; $('shotError').textContent='';
+    setCatalogBusy(true); $('saveReview').disabled=true; $('shotError').textContent='';
     const response=await post('cashback-confirm',{...body,requestId:replay.key});
     if(mode==='offer')sessionOffers.set(offerKey(response.cardId,response.month),{rules:response.rules,slots:response.slots});
     walletPreferredCard=response.cardId || target.cardId || walletPreferredCard;
     const returnToPlan=!!suggestedMonth;
-    await load(); invalidatePlan(); busy=false; dirty=false; closeReview(true);
+    setCatalogBusy(false);
+    dirty=false;
+    await closeReview(true);
+    try{await load();}catch(loadErr){toast(loadErr.message||'Не удалось обновить кошелёк');}
+    invalidatePlan();
     if(!returnToPlan && typeof walletRoute==='function') walletRoute('cards', true);
     toast(mode==='offer'?'Предложения сохранены для плана':'Категории сохранены');
-    }catch(err){fail(err,$('shotError')||$('reviewNeed'));}finally{setCatalogBusy(false); $('saveReview').disabled=false; $('saveReview').textContent=$('reviewForm').dataset.density==='compact'?'Сохранить':'Сохранить категории'; $('reviewForm').inert=false; updateReviewFooter();}
+    }catch(err){fail(err,$('shotError')||$('reviewNeed'));}finally{setCatalogBusy(false); $('saveReview').disabled=false; $('saveReview').textContent=$('reviewForm').dataset.density==='compact'?'Сохранить':'Сохранить категории'; updateReviewFooter();}
   };
   async function closeReview(force){
     if(busy) return false;
     if(!force && !(await mayDiscard())) return false;
     dirty=false; clearShot(); review.hidden=true; $('reviewRows').replaceChildren();
     if(suggestedMonth){planner.hidden=false; (origin?.isConnected?origin:$('calculatePlan')).focus();}
-    else (origin||$('addCashbackBtn')).focus();
+    else{const focusEl=(origin?.isConnected&&!origin.hidden)?origin:(!$('addCashbackBtn')?.hidden?$('addCashbackBtn'):$('openCatalog'));focusEl?.focus();}
     suggestedMonth=null; return true;
   }
   function closePlanner(){
@@ -260,9 +288,9 @@
     else ($('openPlan')||planOrigin)?.focus();
     return true;
   }
-  $('closeCatalog').onclick=()=>closeReview(); $('closePlan').onclick=closePlanner;
+  $('closeCatalog').onclick=()=>{setCatalogBusy(false); closeReview();}; $('closePlan').onclick=closePlanner;
   window.walletCashbackBack=()=>{
-    if(!review.hidden){void closeReview(true);return true;}
+    if(!review.hidden){setCatalogBusy(false); void closeReview(true);return true;}
     const discard=$('discardDialog');
     if(discard&&!discard.hidden){$('discardStay').click();return true;}
     if(!planner.hidden){closePlanner();return true;}
@@ -306,4 +334,5 @@
     }catch(err){if(token===planEpoch){$('planResult').replaceChildren();fail(err,$('planError'));}}finally{if(token===planEpoch)$('calculatePlan').disabled=false;}
   };
   new ResizeObserver(()=>{if($('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot();applyCarouselTransforms();}}).observe($('cardCarousel'));
+  window.openCashbackDecision=trigger=>openDecision(trigger);
 })();

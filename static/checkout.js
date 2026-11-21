@@ -60,6 +60,15 @@ const checkout = (() => {
       const lead=node('p',null,'advice-lead');
       lead.append(node('strong',amountText(r.cashbackKopecks),'advice-value'), document.createTextNode(` · ${rate} на ${catHuman.toLowerCase()}`));
       article.append(lead);
+      const rival=all[1];
+      if(rival){
+        const why=node('p',null,'buy-why');
+        if(r.limitApplied && r.limitKopecks!=null) why.textContent=`Учтён лимит правила ${amountText(r.limitKopecks)}.`;
+        else if(r.cashbackKopecks===rival.cashbackKopecks) why.textContent=`Две карты дают по ${amountText(r.cashbackKopecks)}.`;
+        else if(r.cashbackKopecks>rival.cashbackKopecks) why.textContent=`На ${amountText(r.cashbackKopecks-rival.cashbackKopecks)} больше, чем «${rival.cardName}».`;
+        else why.textContent=`Совпадает с лучшим вариантом по вашим условиям.`;
+        article.append(why);
+      }
     }else{
       const line=node('p',`${title.textContent} · ${amountText(r.cashbackKopecks)}`,'advice-line');
       article.append(line);
@@ -82,7 +91,7 @@ const checkout = (() => {
       let receipt;try{receipt=JSON.parse(sessionStorage.getItem(key))}catch{}if(receipt?.sig!==sig){receipt={sig,id:crypto.randomUUID()};sessionStorage.setItem(key,JSON.stringify(receipt));}
       recording=true;submit.disabled=true;msg.textContent='Записываем…';const ticket=epoch;
       try{await api('/api/me/purchases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,requestId:receipt.id})});sessionStorage.removeItem(key);if(epoch!==ticket){toast('Покупка записана');return;}field.value='';el('clearAmount').hidden=true;results.replaceChildren();status.textContent='Покупка записана. '+label(selected)+' · '+amountText(value);const next=button('Открыть историю',()=>showHistory());results.append(next);next.focus();}
-      catch{msg.textContent='Не удалось подтвердить запись. Повторите с теми же данными — дубля не будет.';}finally{recording=false;submit.disabled=false;}
+      catch(error){msg.textContent=error?.message||'Не удалось подтвердить запись. Повторите с теми же данными — дубля не будет.';}finally{recording=false;submit.disabled=false;}
     };return form;
   }
   async function calculate(ticket,value){
@@ -91,7 +100,7 @@ const checkout = (() => {
       else{status.textContent=all[0].cashbackKopecks===0?`По вашим картам в категории «${label(selected)}» — 0 ₽.`:`Ожидаемый возврат · карт в сравнении: ${all.length}`;
         data.top3.forEach((r,i)=>results.append(row(r,i,all)));if(all.length>data.top3.length){const more=node('details',null,'more-results');const summary=node('summary',`Все подходящие карты (${all.length})`);more.append(summary);summary.parentElement.addEventListener('toggle',()=>{if(!more.open||more.dataset.filled)return;more.dataset.filled='1';all.slice(data.top3.length).forEach((r,i)=>more.append(row(r,i+data.top3.length,all)));});results.append(more);}
         results.append(recordForm(all,value));}
-    }catch{if(ticket!==epoch)return;results.replaceChildren(button('Повторить расчёт',queue));status.textContent='Не удалось рассчитать кэшбэк. Проверьте соединение и повторите.';}
+    }catch(error){if(ticket!==epoch)return;results.replaceChildren(button('Повторить расчёт',queue));status.textContent=error?.message||'Не удалось рассчитать кэшбэк. Проверьте соединение и повторите.';}
   }
   function queue(){const ticket=++epoch;clearTimeout(timer);results.replaceChildren();const {value,msg}=parse(field.value);field.setAttribute('aria-invalid',String(!!field.value&&!value));el('clearAmount').hidden=!field.value;
     if(!selected||!value){status.textContent=!selected?'Выберите категорию покупки.':msg;return;}status.textContent='Считаем…';timer=setTimeout(()=>calculate(ticket,value),160);}

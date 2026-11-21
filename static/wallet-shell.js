@@ -12,8 +12,37 @@ const DEMO_DECK = [
   {cardId:'demo-akbars', name:'Ак Барс', demo:true, paint:{color:'#00915A', ink:'#ffffff', accent:'#d2f5e4'}, rules:[{label:'АЗС', categoryId:'fuel', rateBps:700},{label:'Кафе', categoryId:'cafe', rateBps:400},{label:'Все покупки', categoryId:'all', rateBps:100}]},
   {cardId:'demo-gpb', name:'Газпромбанк', demo:true, paint:{color:'#1F4E9D', ink:'#ffffff', accent:'#d5e2ff'}, rules:[{label:'АЗС', categoryId:'fuel', rateBps:1000},{label:'Транспорт', categoryId:'transport', rateBps:500},{label:'Все покупки', categoryId:'all', rateBps:100}]}
 ];
+const categoryIconPaths={
+  supermarkets:'M2 3h3l3 13h12l2-10H6 M9 19a1.5 1.5 0 1 0 .1 0 M18 19a1.5 1.5 0 1 0 .1 0',
+  cafe:'M3 8h14v5a6 6 0 0 1-6 6H9a6 6 0 0 1-6-6z M17 9h2a3 3 0 0 1 0 6h-2 M3 22h16 M7 3v2 M12 2v3',
+  fuel:'M3 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17 M2 21h14 M6 6h5v5H6z M14 12h2a2 2 0 0 1 2 2v3a2 2 0 0 0 4 0V9l-4-4 M20 7v3h2',
+  pharmacy:'M8 3h8v5h5v8h-5v5H8v-5H3V8h5z',
+  transport:'M5 17V6q0-3 7-3t7 3v11q0 2-2 2H7q-2 0-2-2z M5 11h14 M8 15h1 M15 15h1 M7 20l-2 2 M17 20l2 2',
+  clothes:'M8 3q4 4 8 0l6 4-3 5-3-2v11H8V10l-3 2-3-5z', clothing:'M8 3q4 4 8 0l6 4-3 5-3-2v11H8V10l-3 2-3-5z',
+  electronics:'M3 4h18v13H3z M12 17v4 M8 21h8', marketplace:'M3 8l3-5h12l3 5v2q-2 3-4 0-3 3-5 0-3 3-5 0-2 3-4 0z M5 13v8h14v-8',
+  entertainment:'M3 7l16-5 2 5-16 5z M4 12h17v9H4z M8 6l3 3 M14 4l3 3', utilities:'M13 2L5 14h6l-1 8 9-13h-7z',
+  travel:'M3 8h18v13H3z M9 8V4h6v4 M7 9v11 M17 9v11', all:'M2 5h20v14H2z M3 10h18 M6 15h3',
+  other:'M3 5h12l7 7-10 10-9-9z M7 9h1'
+};
+function categoryIconSvg(id){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');
+  svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d', categoryIconPaths[id]||categoryIconPaths.other);
+  svg.append(path);
+  return svg;
+}
 function walletCount(n){return n===1?'1 карта':n>1&&n<5?`${n} карты`:`${n} карт`;}
 function purchaseCount(n){const mod10=n%10, mod100=n%100; const word=mod10===1&&mod100!==11?'покупка':mod10>=2&&mod10<=4&&(mod100<12||mod100>14)?'покупки':'покупок'; return `${n} ${word}`;}
+function rubFromField(text){
+  const raw=String(text||'').trim();
+  if(!raw) throw new Error('Введите сумму');
+  if(!/^\d+(?:[.,]\d{1,2})?$/.test(raw)) throw new Error('Проверьте сумму');
+  const [whole,part='']=raw.split(/[.,]/);
+  return Number(whole)*100+Number(part.padEnd(2,'0'));
+}
+function rubDisplay(kopecks){return (kopecks/100).toLocaleString('ru-RU',{minimumFractionDigits:kopecks%100?'2':0,maximumFractionDigits:2});}
 function profileEmoji(login){
   const icons=['🙂','🌿','⭐️','💳','🦊','🐻','🎯','🌙'];
   let h=0; for(let i=0;i<login.length;i++) h=(h*31+login.charCodeAt(i))>>>0;
@@ -35,6 +64,22 @@ function walletBank(card){
   const key=(card?.bankId||card?.name||card?.cardName||'').toString().toLowerCase().replace(/[^a-zа-я0-9]/gi,'');
   return banks.find(bank=>bank.id===card?.bankId || bank.name===(card?.name||card?.cardName) || bank.name.toLowerCase().replace(/[^a-zа-я0-9]/gi,'')===key) || null;
 }
+function walletBankLogo(card){
+  if(card?.demo && typeof card.cardId==='string' && card.cardId.startsWith('demo-')){
+    const hit=banks.find(bank=>bank.id===card.cardId.slice(5));
+    if(hit?.logo) return hit.logo;
+  }
+  const bank=walletBank(card);
+  return bank?.logo || null;
+}
+window.walletBankLogo=walletBankLogo;
+function carouselCardLogoMarkup(card){
+  const logo=walletBankLogo(card);
+  const letter=escapeHtml((card?.cardName||card?.name||'?').charAt(0));
+  if(logo) return `<span class="carousel-card-logo has-img" aria-hidden="true"><img src="${escapeHtml(logo)}" alt="" width="31" height="31" decoding="async" loading="lazy"></span>`;
+  return `<span class="carousel-card-logo" aria-hidden="true">${letter}</span>`;
+}
+window.carouselCardLogoMarkup=carouselCardLogoMarkup;
 function walletCardCaption(card){
   const rules=card.rules||[];
   if(!rules.length) return 'Добавить условия';
@@ -58,9 +103,13 @@ function renderWalletCardDetails(card){
     list.hidden=!rules.length;
     rules.forEach(rule=>{
       const li=document.createElement('li');
-      const name=rule.label||categories[rule.categoryId]||rule.categoryId;
-      li.append(Object.assign(document.createElement('span'),{className:'carousel-cat-name',textContent:name}));
-      li.append(Object.assign(document.createElement('span'),{className:'carousel-cat-rate',textContent:`${formatRate(rule.rateBps)}%`}));
+      const catId=rule.categoryId||'other';
+      const name=rule.label||categories[catId]||catId;
+      const main=document.createElement('span'); main.className='carousel-cat-main';
+      const mark=document.createElement('span'); mark.className='carousel-cat-mark'; mark.append(categoryIconSvg(catId));
+      const nameEl=document.createElement('span'); nameEl.className='carousel-cat-name'; nameEl.textContent=name;
+      main.append(mark, nameEl);
+      li.append(main, Object.assign(document.createElement('span'),{className:'carousel-cat-rate',textContent:`${formatRate(rule.rateBps)}%`}));
       list.append(li);
     });
   }
@@ -96,6 +145,7 @@ function applyWalletRoute(route){
   if(route==='cards' && $('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot(); applyCarouselTransforms();}
   if(route==='history') renderHistory();
   if(route==='account') openSettings();
+  if(route==='home') renderHomeMonthCashback();
   const focus={home:'homeTitle',cards:'cards-title',history:'historyTitle',account:'accountTitle'}[route];
   if(focus && $(focus)) $(focus).focus({preventScroll:true});
 }
@@ -124,17 +174,46 @@ function entryRoute(forceHome){
 }
 function syncWalletRoute(forceHome){ walletRoute(entryRoute(forceHome), true); }
 async function loadWalletData(){
+  const statusRow=$('walletStatus')?.closest('.wallet-status');
+  if(statusRow) statusRow.classList.remove('is-error');
   $('walletStatus').textContent=''; $('retryWallet').hidden=true;
   try{
-    [catalog, saved, manual]=await Promise.all([api('/api/cards'), api('/api/me/cards'), api('/api/me/manual-cards')]);
+    [catalog, saved, manual]=await Promise.all([
+      apiPart('Справочник карт','/api/cards'),
+      apiPart('Список в кошельке','/api/me/cards'),
+      apiPart('Ваши карты','/api/me/manual-cards'),
+    ]);
     await fillMeta(); renderCards(); writeDevice();
+    if(!$('hero').hidden) renderHomeMonthCashback();
     if($('accountPanel') && !$('accountPanel').hidden) openSettings();
   }catch(error){
-    $('walletStatus').textContent=error.message; $('retryWallet').hidden=false;
-    if(!carouselPos.all.length) $('carouselTrack').innerHTML='<div class="empty"><strong>Не удалось загрузить кошелёк</strong><span>Повторите загрузку.</span></div>';
+    if(statusRow) statusRow.classList.add('is-error');
+    $('walletStatus').textContent=error.message||'Не удалось загрузить кошелёк.';
+    $('retryWallet').hidden=false;
+    if(!carouselPos.all.length) $('carouselTrack').innerHTML='<div class="empty"><strong>Не удалось загрузить кошелёк</strong><span>'+(error.message||'Повторите загрузку.')+'</span></div>';
   }
 }
-function expireSession(){deviceLogin=null; $('appScreen').hidden=true; $('authScreen').hidden=false; $('welcomeScreen').hidden=true; showRemembered();}
+function expireSession(){
+  deviceLogin=null;
+  sessionStorage.removeItem('advisor-auth-home');
+  if(typeof manual!=='undefined') manual=[];
+  else if(window.manual) window.manual=[];
+  if(typeof saved!=='undefined') saved=[];
+  else if(window.saved) window.saved=[];
+  const pos=typeof carouselPos!=='undefined'?carouselPos:window.carouselPos;
+  if(pos){pos.all=[]; cancelAnimationFrame(pos.raf);}
+  for(const id of ['addDialog','deleteDialog','planDialog','catalogDialog']) {const node=$(id); if(node) node.hidden=true;}
+  if($('accountPanel')) $('accountPanel').hidden=true;
+  $('hero').hidden=false; $('content').hidden=true;
+  $('buyPanel').hidden=true; $('cardsPanel').hidden=true; $('historyPanel').hidden=true;
+  if(location.hash) history.replaceState(null,'',location.pathname+location.search);
+  $('authScreen').hidden=true;
+  $('appScreen').hidden=true;
+  $('welcomeScreen').hidden=false;
+  if($('authPassword')) $('authPassword').value='';
+  if($('sessionGate')) $('sessionGate').hidden=true;
+}
+window.expireSession=expireSession;
 function openDialog(dialog, focus, source){walletReturn=source||document.activeElement; dialog.hidden=false; focus?.focus();}
 function closeDialog(dialog){dialog.hidden=true; if(walletReturn?.isConnected) walletReturn.focus();}
 function trap(dialog){if(!dialog) return; dialog.addEventListener('keydown',event=>{
@@ -169,8 +248,9 @@ function fillAddChoices(){
   const select=$('newBank'), catalogMode=$('addSource').value==='catalog', query=$('bankSearch').value.trim().toLowerCase();
   const previous=select.value;
   select.replaceChildren();
-  const items=catalogMode?catalog.map(card=>({value:card.cardId,label:`${card.cardName} · ${card.bankName}`}))
-    :banks.filter(bank=>!query || bank.name.toLowerCase().includes(query) || bank.id.includes(query)).map(bank=>({value:bank.id,label:bank.name}));
+  const bankItem=bank=>({value:bank.id,label:bank.name,logo:bank.logo||null});
+  const items=catalogMode?catalog.map(card=>({value:card.cardId,label:`${card.cardName} · ${card.bankName}`,logo:null}))
+    :banks.filter(bank=>!query || bank.name.toLowerCase().includes(query) || bank.id.includes(query)).map(bankItem);
   items.forEach(item=>select.append(new Option(item.label,item.value)));
   if(previous && [...select.options].some(option=>option.value===previous)) select.value=previous;
   else if(items.length===1) select.value=items[0].value;
@@ -178,10 +258,12 @@ function fillAddChoices(){
   if(catalogMode){box.hidden=true; $('bankSearch').setAttribute('aria-expanded','false');}
   else {
     box.hidden=false; $('bankSearch').setAttribute('aria-expanded','true');
-    const list=query?items:banks.map(bank=>({value:bank.id,label:bank.name}));
+    const list=query?items:banks.map(bankItem);
     list.forEach((item,index)=>{
       const option=document.createElement('button'); option.type='button'; option.className='bank-row'; option.setAttribute('role','option');
-      option.textContent=item.label; option.onmousedown=event=>event.preventDefault();
+      if(item.logo){const logo=document.createElement('img'); logo.className='bank-row-logo'; logo.src=item.logo; logo.alt=''; logo.width=32; logo.height=32; logo.decoding='async'; logo.loading='lazy'; logo.onerror=()=>logo.remove(); option.append(logo);}
+      const label=document.createElement('span'); label.className='bank-row-name'; label.textContent=item.label; option.append(label);
+      option.onmousedown=event=>event.preventDefault();
       option.onclick=()=>{
         $('newBank').value=item.value; $('bankSearch').value=item.label;
         if($('addSelectedBank')){$('addSelectedBank').hidden=false; $('addSelectedBank').textContent='Выбран: '+item.label;}
@@ -204,6 +286,133 @@ function syncHistoryMonthText(){
   if(!input||!text) return;
   text.textContent=input.value?monthTitle(input.value):'Текущий месяц';
 }
+async function renderHomeMonthCashback(){
+  const section=$('homeMonthCashback'), host=$('homeMonthCashbackBody');
+  if(!section||!host) return;
+  if(document.documentElement.dataset.demo==='cards'||$('appScreen').hidden){
+    section.hidden=true;
+    return;
+  }
+  section.hidden=false;
+  host.className='month-cashback is-loading';
+  host.textContent='Считаем кэшбэк…';
+  try{
+    const data=await api('/api/me/stats');
+    host.className='month-cashback';
+    host.replaceChildren();
+    if(!data.count){
+      const empty=document.createElement('p');
+      empty.className='month-cashback-meta';
+      empty.textContent='Покупок в этом месяце пока нет. Запишите покупку после совета.';
+      host.append(empty);
+      const journal=document.createElement('button');
+      journal.type='button'; journal.className='month-cashback-journal'; journal.textContent='Покупки за месяц';
+      journal.onclick=()=>walletRoute('history');
+      host.append(journal);
+      return;
+    }
+    const grid=document.createElement('div'); grid.className='month-cashback-grid';
+    const actual=document.createElement('div'); actual.className='month-cashback-actual';
+    const kicker=document.createElement('span'); kicker.className='month-cashback-kicker'; kicker.textContent='Получено';
+    actual.append(kicker);
+    if(data.actualCashbackKopecks==null){
+      const pending=document.createElement('span'); pending.className='month-cashback-pending'; pending.textContent='—';
+      actual.append(pending);
+    }else{
+      const value=document.createElement('strong'); value.className='money'; value.textContent=money(data.actualCashbackKopecks);
+      actual.append(value);
+    }
+  const side=document.createElement('div'); side.className='month-cashback-side';
+    const calc=document.createElement('p');
+    calc.append(Object.assign(document.createElement('span'),{textContent:'По расчёту'}),
+      Object.assign(document.createElement('strong'),{className:'money',textContent:money(data.calculatedKopecks)}));
+    const missed=document.createElement('p');
+    missed.append(Object.assign(document.createElement('span'),{textContent:'Можно было ещё'}),
+      Object.assign(document.createElement('strong'),{className:'money',textContent:money(Math.max(0,data.missedKopecks||0))}));
+    side.append(calc, missed);
+    grid.append(actual, side);
+    host.append(grid);
+    const meta=document.createElement('p'); meta.className='month-cashback-meta';
+    if(!data.actualCashbackCount) meta.textContent='Нет подтверждённых начислений';
+    else meta.textContent=`Подтверждено по ${data.actualCashbackCount} из ${purchaseCount(data.count)}`;
+    host.append(meta);
+    if(Array.isArray(data.cards)&&data.cards.length){
+      const cards=document.createElement('details'); cards.className='month-cashback-cards';
+      const summary=document.createElement('summary'); summary.textContent='По картам'; cards.append(summary);
+      const list=document.createElement('ul');
+      data.cards.forEach(card=>{
+        const li=document.createElement('li');
+        const name=document.createElement('span'); name.className='name'; name.textContent=card.name||card.cardId;
+        const vals=document.createElement('span'); vals.className='vals';
+        const actualText=card.actualCashbackCount
+          ?`${money(card.actualCashbackKopecks)} · ${card.actualCashbackCount}`
+          :`${money(card.cashbackKopecks)} расчёт`;
+        vals.textContent=actualText;
+        li.append(name, vals); list.append(li);
+      });
+      cards.append(list); host.append(cards);
+    }
+    const journal=document.createElement('button');
+    journal.type='button'; journal.className='month-cashback-journal'; journal.textContent='Покупки за месяц';
+    journal.onclick=()=>walletRoute('history');
+    host.append(journal);
+  }catch(error){
+    host.className='month-cashback is-error'; host.replaceChildren();
+    const message=document.createElement('p'); message.textContent=error.message||'Не удалось загрузить сводку.';
+    const retry=document.createElement('button'); retry.type='button'; retry.textContent='Повторить';
+    retry.onclick=()=>renderHomeMonthCashback();
+    host.append(message, retry);
+  }
+}
+window.renderHomeMonthCashback=renderHomeMonthCashback;
+function buildActualCashbackEditor(item){
+  const wrap=document.createElement('div'); wrap.className='journal-actual';
+  const title=document.createElement('h4'); title.textContent='Фактический кэшбэк';
+  const label=document.createElement('label');
+  label.textContent='Сколько начислил банк, ₽';
+  const input=document.createElement('input');
+  input.inputMode='decimal'; input.autocomplete='off';
+  input.placeholder='Например, 48';
+  if(item.actualCashbackKopecks!=null) input.value=rubDisplay(item.actualCashbackKopecks);
+  label.append(input);
+  const note=document.createElement('p'); note.className='journal-actual-note';
+  const syncNote=()=>{
+    if(item.actualCashbackKopecks==null) note.textContent='Отметка не подтверждена';
+    else if(item.actualCashbackKopecks===0) note.textContent='Подтверждённый ноль';
+    else note.textContent=`Сохранено: ${money(item.actualCashbackKopecks)}`;
+  };
+  syncNote();
+  const error=document.createElement('p'); error.className='journal-actual-error'; error.hidden=true;
+  const actions=document.createElement('div'); actions.className='journal-actual-actions';
+  const save=document.createElement('button'); save.type='button'; save.className='primary'; save.textContent='Сохранить';
+  const clear=document.createElement('button'); clear.type='button'; clear.textContent='Удалить отметку';
+  const busy=flag=>{save.disabled=flag; clear.disabled=flag; input.readOnly=flag;};
+  save.onclick=async()=>{
+    error.hidden=true;
+    let amount;
+    try{amount=rubFromField(input.value);}catch(e){error.textContent=e.message; error.hidden=false; return;}
+    busy(true);
+    try{
+      await api(`/api/me/purchases/${item.id}/cashback`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({amountKopecks:amount})});
+      item.actualCashbackKopecks=amount; syncNote(); toast('Начисление сохранено');
+      renderHomeMonthCashback();
+    }catch(e){error.textContent=e.message||'Не удалось сохранить'; error.hidden=false;}
+    finally{busy(false);}
+  };
+  clear.onclick=async()=>{
+    error.hidden=true; busy(true);
+    try{
+      await api(`/api/me/purchases/${item.id}/cashback`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({amountKopecks:null})});
+      item.actualCashbackKopecks=null; input.value=''; syncNote(); toast('Отметка удалена');
+      renderHomeMonthCashback();
+    }catch(e){error.textContent=e.message||'Не удалось удалить'; error.hidden=false;}
+    finally{busy(false);}
+  };
+  actions.append(save, clear);
+  wrap.append(title, label, note, actions, error);
+  wrap.addEventListener('click', event=>event.stopPropagation());
+  return wrap;
+}
 function dayTitle(iso){
   if(!iso) return 'Без даты';
   return new Intl.DateTimeFormat('ru-RU',{day:'numeric', month:'long', timeZone:'UTC'}).format(new Date(iso.slice(0,10)+'T12:00:00Z'));
@@ -219,11 +428,9 @@ async function renderHistory(){
     syncHistoryMonthText();
     const total=document.createElement('p'); total.className='journal-total';
     const strong=document.createElement('strong'); strong.className='money'; strong.textContent=money(data.calculatedKopecks);
-    const caption=document.createElement('span'); caption.textContent='Расчётный кэшбэк';
+    const caption=document.createElement('span'); caption.className='sr-only'; caption.textContent='Расчётный кэшбэк за месяц';
     total.append(strong, caption);
-    const noteShort=(data.note||'Расчёт по записанным покупкам.').split('.').filter(Boolean)[0]+'.';
-    const meta=document.createElement('p'); meta.className='journal-meta'; meta.textContent=`${purchaseCount(data.count)} · ${noteShort}`;
-    summary.append(total, meta);
+    summary.append(total);
     const ask=document.createElement('button'); ask.type='button'; ask.className='secondary-action'; ask.textContent='Разобрать месяц';
     ask.onclick=async()=>{ask.disabled=true; ask.textContent='Разбираем…'; try{const reply=await api('/api/me/stats/comment',{method:'POST'},45000); const comment=document.createElement('p'); comment.textContent=reply.comment; summary.append(comment);}catch(error){toast(error.message);}finally{ask.disabled=false; ask.textContent='Разобрать месяц';}};
     summary.append(ask); host.append(summary);
@@ -243,13 +450,14 @@ async function renderHistory(){
         if(gap>0){const extra=document.createElement('span'); extra.className='journal-gap'; extra.textContent=`Можно было получить ещё ${money(gap)}`; main.append(extra);}
         const moneyCol=document.createElement('span'); moneyCol.className='journal-money';
         const amount=document.createElement('strong'); amount.className='money'; amount.textContent=money(item.amountKopecks);
-        const cash=document.createElement('span'); cash.className='journal-cash'; cash.textContent=item.chosenKopecks==null?'':`+${money(item.chosenKopecks)} кэшбэка`;
+        const cash=document.createElement('span'); cash.className='journal-cash'; cash.textContent=item.chosenKopecks==null?'':`+${money(item.chosenKopecks)}`;
         moneyCol.append(amount, cash); row.append(main, moneyCol);
         const detail=document.createElement('div'); detail.className='journal-detail'; detail.hidden=true;
         const chosen=document.createElement('p'); chosen.textContent=`Выбранная карта: ${item.chosenName||'—'}${item.chosenKopecks==null?'':`, ${money(item.chosenKopecks)}`}`;
         const best=document.createElement('p'); best.textContent=`Лучшая по расчёту: ${item.recommendedName||'—'}${item.recommendedKopecks==null?'':`, ${money(item.recommendedKopecks)}`}`;
         const diff=document.createElement('p'); diff.textContent=`Разница: ${item.recommendedKopecks==null||item.chosenKopecks==null?'—':money(gap)}`;
         detail.append(chosen, best, diff);
+        if(item.id!=null) detail.append(buildActualCashbackEditor(item));
         row.onclick=()=>{detail.hidden=!detail.hidden; row.setAttribute('aria-expanded', String(!detail.hidden));};
         list.append(row, detail);
       });
@@ -316,10 +524,20 @@ if($('authGuest')) $('authGuest').addEventListener('click',async()=>{
   const button=$('authGuest');
   button.disabled=true; $('authError').textContent='';
   try{
-    const user=await api('/api/auth/guest',{method:'POST'});
+    const user=await api('/api/auth/guest',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:'{}',
+    });
     deviceLogin=user.login; localStorage.setItem('advisor-login',user.login);
     sessionStorage.setItem('advisor-auth-home','1'); await checkAuth();
-  }catch(error){$('authError').textContent=error.message||'Не удалось войти как гость'; button.disabled=false;}
+  }catch(error){
+    const text=error.status===404
+      ?'Вход как гость недоступен — перезапустите сервер с последней версией.'
+      :error.message||'Не удалось войти как гость';
+    $('authError').textContent=text;
+    button.disabled=false;
+  }
 });
 $('openCards').addEventListener('click',()=>walletRoute('cards'));
 $('emptyAdd').addEventListener('click',()=>{walletRoute('cards',true); openAddCard($('openCatalog'));});
@@ -373,7 +591,12 @@ async function submitNewCard(event){
 }
 $('closeAdd').addEventListener('click',()=>closeDialog($('addDialog')));
 $('addRouteBank').addEventListener('click',showBankForm);
-$('addRouteShot').addEventListener('click',()=>{closeDialog($('addDialog')); $('addCashbackBtn').click();});
+$('addRouteShot').addEventListener('click',()=>{
+  const back=addReturn||$('openCatalog');
+  $('addDialog').hidden=true;
+  if(typeof window.openCashbackDecision==='function') window.openCashbackDecision(back);
+  else $('addCashbackBtn').click();
+});
 if($('cardMenuBtn') && !$('cardMenuBtn').hidden) $('cardMenuBtn').addEventListener('click',()=>{const open=$('cardMenu').hidden; $('cardMenu').hidden=!open; $('cardMenuBtn').setAttribute('aria-expanded', String(open)); if(open) $('addCashbackBtn').focus();});
 $('makeUsualBtn').addEventListener('click',async()=>{
   const card=activeCard(); if(!card) return; $('makeUsualBtn').disabled=true;
@@ -390,10 +613,11 @@ if($('themeLight')) $('themeLight').addEventListener('click',()=>{applyTheme('li
 if($('themeDark')) $('themeDark').addEventListener('click',()=>{applyTheme('dark'); syncThemeControls();});
 $('logout').addEventListener('click',async()=>{
   if(!window.confirm('Выйти из кошелька на этом устройстве?')) return;
-  $('logout').disabled=true;
-  try{await api('/api/auth/logout',{method:'POST'}); expireSession();}
+  $('logout').disabled=true; $('settingsStatus').textContent='';
+  try{await api('/api/auth/logout',{method:'POST'});}
   catch(error){$('settingsStatus').textContent=error.message;}
-  finally{$('logout').disabled=false;}
+  expireSession();
+  $('logout').disabled=false;
 });
 $('cancelDelete').addEventListener('click',()=>closeDialog($('deleteDialog')));
 $('confirmDelete').addEventListener('click',async()=>{
@@ -457,3 +681,9 @@ document.querySelectorAll('[data-demo-count]').forEach(button=>button.addEventLi
 if($('demoReset')) $('demoReset').addEventListener('click',()=>applyDemoCount(7));
 if(new URLSearchParams(location.search).get('demo')==='cards') startDemo();
 else checkAuth();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  });
+}
