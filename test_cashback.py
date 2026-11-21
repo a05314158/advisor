@@ -264,7 +264,13 @@ class Cashback(unittest.TestCase):
             ''')
         initialize(legacy)
         with API(create_app(legacy)) as client:
+            with connect(legacy) as db:
+                db.execute("ALTER TABLE manual_cards ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''")
+                db.execute('ALTER TABLE manual_cards ADD COLUMN monthly_limit INTEGER')
+                db.execute('ALTER TABLE saved ADD COLUMN monthly_limit INTEGER')
             self.login(client, 'next_wallet')
+            self.assertEqual(client._request('PUT', '/api/me/cards/A', None).status_code, 204)
+            self.assertEqual(client.get('/api/me/cards').json(), ['A'])
             card = client.post('/api/me/manual-cards', json={
                 'name': 'СберБанк', 'rules': [{'categoryId': 'fuel', 'rateBps': 400}],
             }).json()['cardId']
