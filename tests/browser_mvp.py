@@ -86,10 +86,51 @@ def category(page, name):
     expect(button(page, re.compile('Изменить'))).to_contain_text(name)
 
 
+def purchase_plan_scenario(page):
+    ids = []
+    for name, supermarket, transport in [('Карта плана А', 1000, 1000), ('Карта плана Б', 800, 100)]:
+        response = page.request.post('/api/me/manual-cards', data={'name': name, 'rules': [
+            {'categoryId': 'supermarkets', 'rateBps': supermarket},
+            {'categoryId': 'transport', 'rateBps': transport},
+        ]})
+        assert response.ok, response.text()
+        ids.append(response.json()['cardId'])
+    response = page.request.put(f'/api/me/cards/{ids[0]}/monthly',
+                                data={'limitKopecks': 30_000, 'usedKopecks': 20_000})
+    assert response.ok, response.text()
+
+    page.evaluate('() => load()')
+    page.locator('#openBuy').click()
+    page.get_by_text('Спланировать несколько покупок', exact=True).click()
+    rows = page.locator('#purchasePlanRows').get_by_role('group')
+    expect(rows).to_have_count(2)
+    for row, category_id in zip(rows.all(), ['supermarkets', 'transport'], strict=True):
+        row.get_by_label('Категория').select_option(category_id)
+        row.get_by_label('Сумма, ₽').fill('1 000')
+    button(page, 'Рассчитать план').click()
+    result = page.locator('#purchasePlanResult')
+    for value in ('180', '110', '70'):
+        expect(result).to_contain_text(re.compile(value + r'\s*₽'))
+    for row, name in zip(result.get_by_role('listitem').all(), ('Карта плана Б', 'Карта плана А'), strict=True):
+        expect(row).to_contain_text(name)
+
+    button(page, 'Добавить покупку').click()
+    expect(rows).to_have_count(3)
+    expect(result).to_be_hidden()
+    button(page, 'Удалить покупку 3').click()
+    expect(rows).to_have_count(2)
+    page.locator('#purchasePlan summary').click()
+    button(page.locator('#buyPanel'), 'Назад').click()
+    for card in ids:
+        assert page.request.delete(f'/api/me/manual-cards/{card}').ok
+    page.evaluate('() => load()')
+
+
 def catalog_scenario(page, directory):
     buy = page.locator('#buyPanel')
     amount, status = page.locator('#buyAmount'), page.locator('#buyStatus')
-    page.locator('#openBuy').click()
+    page.goto('/#buy')
+    expect(amount).to_be_visible()
     expect(amount).not_to_be_focused()
     expect(button(buy, 'Весь каталог')).to_have_count(0)
     expect(page.locator('#scopeNote')).to_have_count(0)
@@ -222,7 +263,6 @@ def personal_scenario(page, base, directory):
     review = page.locator('#catalogDialog')
     button(review, re.compile('подключённые')).click()
     button(review, 'Ввести условия вручную').click()
-    review.locator('#reviewSlots').fill('2', force=True)
     for i, (label, code, rate) in enumerate([('Транспорт', 'transport', '15'), ('На все покупки', 'all', '1')]):
         if i:
             button(review, 'Добавить строку').click()
@@ -257,12 +297,77 @@ def personal_scenario(page, base, directory):
     screenshots(page, directory, 'history')
 
 
+def cashback_summary_scenario(page):
+    page.set_viewport_size({'width': 390, 'height': 844})
+    history = page.locator('#historyPanel')
+    history.locator('.journal-row').first.click()
+    form = history.locator('.journal-actual').first
+    amount = form.get_by_label('Сколько начислил банк, ₽')
+    expect(form).to_contain_text('Не подтверждено')
+    amount.fill('48')
+    page.route('**/api/me/purchases/*/cashback', lambda route: route.fulfill(
+        status=503, json={'message': 'Временно недоступно'}), times=1)
+    button(form, 'Сохранить').click()
+    expect(form.get_by_role('status')).to_have_text('Временно недоступно')
+    expect(amount).to_have_value('48')
+    button(form, 'Сохранить').click()
+    expect(form.get_by_role('status')).to_have_text('Начисление сохранено.')
+
+    page.goto('/#home')
+    summary = page.locator('#homeCashback')
+    expect(summary.locator('.month-cashback-actual .money')).to_have_text(re.compile(r'^48(?:,00)?\s*₽$'))
+    expect(summary).to_contain_text('Подтверждено по 1 из 1 записанных покупок')
+    expect(summary).to_contain_text('По расчёту')
+    expect(summary).to_contain_text('Могли получить ещё')
+    summary.get_by_text('По картам', exact=True).click()
+    expect(summary.locator('li').first).to_contain_text(re.compile(r'Получили 48(?:,00)?\s*₽'))
+    assert page.evaluate('document.documentElement.scrollWidth === innerWidth')
+
+    button(summary, 'Покупки за месяц').click()
+    history.locator('.journal-row').first.click()
+    expect(amount).to_have_value('48')
+    amount.fill('0')
+    button(form, 'Сохранить').click()
+    expect(form.get_by_role('status')).to_have_text('Начисление сохранено.')
+    page.locator('#historyBack').click()
+    expect(summary.locator('.month-cashback-actual .money')).to_have_text(re.compile(r'^0(?:,00)?\s*₽$'))
+    button(summary, 'Покупки за месяц').click()
+    history.locator('.journal-row').first.click()
+    button(form, 'Удалить отметку').click()
+    expect(form.get_by_role('status')).to_have_text('Отметка удалена.')
+    page.locator('#historyBack').click()
+    expect(summary).to_contain_text('Нет подтверждённых начислений')
+
+
+def run_cashback_summary(chromium):
+    with isolated_server() as base, sync_playwright() as runtime:
+        browser = runtime.chromium.launch(executable_path=chromium)
+        try:
+            page = browser.new_page(base_url=base, viewport={'width': 390, 'height': 844}, locale='ru-RU')
+            response = page.request.post('/api/auth/register', data={
+                'login': 'cashback_summary', 'password': uuid4().hex,
+            })
+            assert response.ok, response.text()
+            assert page.request.put('/api/me/cards/B').ok
+            page.goto('/#home')
+            expect(page.locator('#homeCashback')).to_contain_text('покупок пока нет')
+            response = page.request.post('/api/me/purchases', data={
+                'chosenCardId': 'B', 'categoryId': 'supermarkets', 'amountKopecks': 250_000,
+            })
+            assert response.ok, response.text()
+            page.goto('/#history')
+            expect(page.locator('.journal-row').first).to_be_visible()
+            cashback_summary_scenario(page)
+        finally:
+            browser.close()
+
+
 def run(chromium, directory, revision):
     directory.mkdir(parents=True, exist_ok=True)
     with isolated_server() as base, sync_playwright() as runtime:
         browser = runtime.chromium.launch(executable_path=chromium)
         try:
-            context = browser.new_context(viewport={'width':390, 'height':844}, locale='ru-RU',
+            context = browser.new_context(base_url=base, viewport={'width':390, 'height':844}, locale='ru-RU',
                                           reduced_motion='reduce', service_workers='block')
             denied, errors = [], []
 
@@ -291,8 +396,13 @@ def run(chromium, directory, revision):
                 expect(page.locator('#openBuy')).to_be_visible()
                 screenshots(page, directory, 'home-empty')
                 expect(page.locator('#openBuy')).to_have_accessible_name('Сравнить карты')
+                purchase_plan_scenario(page)
                 catalog_scenario(page, directory)
+                for card in 'ABCD':
+                    assert page.request.delete(f'/api/me/cards/{card}').ok
+                page.evaluate('() => load()')
                 personal_scenario(page, base, directory)
+                cashback_summary_scenario(page)
                 assert not denied and not errors, (denied, errors)
             except Exception:
                 page.screenshot(path=directory/'failure.png', animations='disabled', full_page=True)
@@ -307,9 +417,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chromium-executable', help='Optional installed Chrome/Edge executable')
     parser.add_argument('--artifacts', type=Path, default=None)
+    parser.add_argument('--cashback-summary-only', action='store_true')
     parser.add_argument('--revision', help='Verify the revision when running a release archive')
     args = parser.parse_args()
-    artifacts = args.artifacts or Path(tempfile.mkdtemp(prefix='advisor-screens-'))
-    print(f'Browser screenshots: {artifacts.resolve()}', flush=True)
-    run(args.chromium_executable, artifacts, args.revision)
-    print('Advisor visible wallet acceptance passed.')
+    if args.cashback_summary_only:
+        run_cashback_summary(args.chromium_executable)
+        print('Cashback summary and journal acceptance passed at 390 px.')
+    else:
+        artifacts = args.artifacts or Path(tempfile.mkdtemp(prefix='advisor-screens-'))
+        print(f'Browser screenshots: {artifacts.resolve()}', flush=True)
+        run(args.chromium_executable, artifacts, args.revision)
+        print('Advisor visible wallet acceptance passed.')

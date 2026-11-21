@@ -494,3 +494,72 @@ html[data-theme=dark] select:focus-visible { outline-color: var(--accent); }
   .ask-block h1, #cards-title, #historyTitle, #accountTitle { font-size: 32px; }
   .journal-total strong, .stat-primary strong { font-size: 32px; }
 }
+
+.home-month-cashback .month-cashback {
+  display: grid; gap: 12px; padding: 14px 16px; border-radius: var(--radius-md);
+  border: 1px solid var(--line); background: var(--surface);
+  box-shadow: 0 8px 24px rgba(23, 24, 23, .06);
+}
+.month-cashback-grid {
+  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: end;
+}
+.month-cashback-actual .month-cashback-kicker {
+  display: block; margin: 0 0 4px; color: var(--quiet); font-size: 13px; font-weight: 600;
+}
+.month-cashback-actual strong {
+  display: block; font-size: clamp(34px, 9vw, 40px); letter-spacing: -.045em; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.month-cashback-actual .month-cashback-pending { font-size: 28px; font-weight: 700; color: var(--quiet); }
+.month-cashback-side { display: grid; gap: 8px; }
+.month-cashback-side p {
+  margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  font-size: 14px; color: var(--quiet);
+}
+.month-cashback-side strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.month-cashback-meta { margin: 0; color: var(--quiet); font-size: 14px; line-height: 1.4; }
+.month-cashback-cards {
+  border-top: 1px solid var(--line); padding-top: 10px;
+}
+.month-cashback-cards summary {
+  cursor: pointer; font-weight: 700; color: var(--ink);
+}
+.month-cashback-cards ul {
+  margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 8px;
+}
+.month-cashback-cards li {
+  display: flex; justify-content: space-between; gap: 10px; font-size: 14px;
+}
+.month-cashback-cards .name { min-width: 0; overflow-wrap: anywhere; }
+.month-cashback-cards .vals { min-width: 0; text-align: right; color: var(--quiet); overflow-wrap: anywhere; }
+.month-cashback-journal {
+  width: 100%; min-height: 48px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+  color: var(--ink); font-weight: 700; text-align: left; padding: 0 14px;
+  border: 1px solid var(--line);
+}
+
+.journal-actual { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.journal-actual h4 { margin: 0 0 8px; font-size: 15px; letter-spacing: -.02em; }
+.journal-actual label { display: grid; gap: 6px; font-size: 13px; color: var(--quiet); font-weight: 600; }
+.journal-actual input {
+  width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.journal-actual-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.journal-actual-actions button {
+  min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-weight: 700;
+}
+.journal-actual-actions button.primary { background: var(--accent); color: var(--accent-ink, #1d1e1a); border-color: transparent; }
+.journal-actual-note { margin: 8px 0 0; font-size: 13px; color: var(--quiet); }
+.journal-actual [role=status] { font-size: 13px; }
+.journal-actual [role=status]:empty { display: none; }
+.journal-actual input[aria-invalid=true] { border-color: var(--danger); }
+.journal-actual button:disabled { opacity: .55; }
+.month-cashback-grid > * { min-width: 0; overflow-wrap: anywhere; }
+.month-cashback-cards .vals span { display: block; }
+@media (max-width: 359px) {
+  .month-cashback-grid { grid-template-columns: minmax(0, 1fr); }
+}

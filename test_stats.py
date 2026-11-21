@@ -66,3 +66,65 @@ class StatsMonthQuery(unittest.TestCase):
                 }).status_code, 201)
                 other = stranger.get('/api/me/stats?month=2026-11').json()
                 self.assertEqual(other['count'], 0)
+
+    def test_actual_summary_uses_only_confirmed_purchases_and_keeps_forecasts(self):
+        from advisor import create_app
+
+        with tempfile.TemporaryDirectory() as folder, patch('advisor.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 21, tzinfo=UTC)
+            path = Path(folder) / 'wallet.sqlite3'
+            initialize(path)
+            app = create_app(path)
+            with API(app) as client, API(app) as other:
+                for login, actor in [('summary_owner', client), ('summary_other', other)]:
+                    self.assertEqual(actor.post('/api/auth/register', json={
+                        'login': login, 'password': 'test-password',
+                    }).status_code, 201)
+
+                def card(name, rate, actor=client):
+                    response = actor.post('/api/me/manual-cards', json={
+                        'name': name, 'rules': [dict(categoryId='cafe', rateBps=rate)],
+                    })
+                    self.assertEqual(response.status_code, 201, response.text)
+                    return response.json()['cardId']
+
+                def purchase(card_id, actor=client):
+                    response = actor.post('/api/me/purchases', json={
+                        'categoryId': 'cafe', 'amountKopecks': 100_000, 'chosenCardId': card_id,
+                    })
+                    self.assertEqual(response.status_code, 201, response.text)
+                    return response.json()['id']
+
+                def confirm(id_, amount, actor=client):
+                    response = actor.put(f'/api/me/purchases/{id_}/cashback', json={'amountKopecks': amount})
+                    self.assertEqual(response.status_code, 204, response.text)
+
+                first, second = card('Карта А', 500), card('Карта Б', 1000)
+                one, two, three = purchase(first), purchase(first), purchase(second)
+                confirm(purchase(card('Другая карта', 1000, other), other), 999_999, other)
+                clock.now.return_value = datetime(2026, 12, 1, tzinfo=UTC)
+                report = lambda: client.get('/api/me/stats?month=2026-11').json()
+                actual = lambda block: (block['actualCashbackKopecks'], block['actualCashbackCount'])
+
+                self.assertEqual(actual(report()), (None, 0))
+                confirm(one, 0)
+                self.assertEqual(actual(report()), (0, 1))
+                confirm(two, 4_800)
+                result = report()
+                self.assertEqual(actual(result), (4_800, 2))
+                self.assertEqual((result['count'], result['calculatedKopecks'], result['missedKopecks']),
+                                 (3, 20_000, 10_000))
+                cards = {row['cardId']: row for row in result['cards']}
+                self.assertEqual(actual(cards[first]), (4_800, 2))
+                self.assertEqual(actual(cards[second]), (None, 0))
+                self.assertEqual((cards[first]['cashbackKopecks'], cards[first]['missedKopecks']), (10_000, 10_000))
+                self.assertIsNone(next(row for row in result['purchases'] if row['id'] == three)['actualCashbackKopecks'])
+                self.assertEqual(actual(client.get('/api/me/stats').json()), (None, 0))
+
+                confirm(two, 5_500)
+                self.assertEqual(actual(report()), (5_500, 2))
+                confirm(two, None)
+                self.assertEqual(actual(report()), (0, 1))
+                confirm(one, None)
+                self.assertEqual(actual(report()), (None, 0))
+                self.assertEqual(report()['missedKopecks'], 10_000)

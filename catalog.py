@@ -123,6 +123,15 @@ def setup(db):
           session TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL, used_kopecks INTEGER,
           PRIMARY KEY(session, card_id, month)
         );
+        CREATE TABLE IF NOT EXISTS wallet_actual_cashback (
+          session TEXT NOT NULL, purchase_id INTEGER NOT NULL, amount_kopecks INTEGER NOT NULL,
+          PRIMARY KEY(session, purchase_id)
+        );
+        CREATE TABLE IF NOT EXISTS wallet_cashback_reconciliations (
+          session TEXT NOT NULL, card_id TEXT NOT NULL, month TEXT NOT NULL,
+          bank_remaining_kopecks INTEGER NOT NULL, reconciled_at TEXT NOT NULL, included_ids TEXT NOT NULL,
+          PRIMARY KEY(session, card_id, month)
+        );
     ''')
     db.execute(f'''
         CREATE TABLE IF NOT EXISTS {wallet_purchase_table(db)} (

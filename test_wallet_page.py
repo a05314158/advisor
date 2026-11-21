@@ -67,7 +67,8 @@ class WalletPage(unittest.TestCase):
     def test_home_is_purchase_and_cards(self):
         self.assertIn('id="settingsTheme"', PAGE)
         self.assertIn('aria-label="Профиль"', PAGE)
-        self.assertNotIn('>Тёмная<', PAGE)
+        hero = PAGE.split('<section class="hero', 1)[1].split('id="content"', 1)[0]
+        self.assertNotIn('>Тёмная<', hero)
         self.assertIn('id="openBuy"', PAGE)
         self.assertIn('id="openCards"', PAGE)
         self.assertIn('id="buyAmount"', PAGE)

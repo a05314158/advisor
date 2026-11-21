@@ -122,8 +122,8 @@
     if($('reviewNeed')) $('reviewNeed').textContent=needs.length?'Нужно: '+needs.join(', '):'';
     $('saveReview').disabled=!!needs.length || busy;
   }
-  function canCompactReview(rules){
-    return mode==='active' && rules.length>0;
+  function canCompactReview(rules, kind){
+    return kind!=='manual' && mode==='active' && rules.length>0;
   }
   function compactRow(rule={}){
     const box=node('div',null,'review-row review-row-compact');
@@ -204,7 +204,7 @@
     $('reviewSlots').value=slots??''; $('reviewSlots').max=128; $('reviewSlots').disabled=kind==='plan' && slots!=null;
     const slotsWrap=$('reviewSlotsLabel'); if(slotsWrap) slotsWrap.hidden=active;
     if($('reviewWarnings')){ $('reviewWarnings').hidden=true; $('reviewWarnings').textContent=''; }
-    const compact=canCompactReview(rules);
+    const compact=canCompactReview(rules, kind);
     $('reviewForm').dataset.density=compact?'compact':'full';
     if($('addRule')) $('addRule').hidden=compact;
     const hint=$('reviewHint');

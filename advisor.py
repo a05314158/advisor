@@ -18,9 +18,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from bank_links import bank_access
+from cashback_balance import owns_card, owns_purchase, personal_caps, reconciliation_view
 from cashback_planner import mount_planner
 from catalog import CATEGORIES, SEED, bank_names, bank_public, connect, initialize, rows, wallet_purchase_table
 from observability import mount_observability
+from purchase_plan import MAX_PURCHASES, allocate_purchases
 PAGE = Path(__file__).with_name('wallet.html')
 SCRIPT = Path(__file__).with_name('wallet-cashback.js')
 BUILD_REVISION = '$Format:%H$'
@@ -64,11 +66,14 @@ def recommend(category: str, amount: int, day: date, rules=None, own=None, month
 def month_totals(items):
     calculated = sum(item['chosenKopecks'] for item in items)
     recommended = sum(item['recommendedKopecks'] for item in items)
+    actual = [item['actualCashbackKopecks'] for item in items if item.get('actualCashbackKopecks') is not None]
     usual_values = [item['usualKopecks'] for item in items]
     usual = None if not items or any(value is None for value in usual_values) else sum(usual_values)
     return {
         'count': len(items),
         'calculatedKopecks': calculated,
+        'actualCashbackKopecks': sum(actual) if actual else None,
+        'actualCashbackCount': len(actual),
         'recommendedKopecks': recommended,
         'missedKopecks': recommended - calculated,
         'usualKopecks': usual,
@@ -531,12 +536,6 @@ def create_app(db_path):
                 db.execute('DELETE FROM usual_card WHERE session = ? AND card_id = ?', (session, card))
         return Response(status_code=204)
 
-    def personal_caps(db, session, month):
-        return {card: (cap, used) for card, cap, used in db.execute('''
-            SELECT l.card_id, l.limit_kopecks, u.used_kopecks FROM wallet_monthly_limits l
-            LEFT JOIN wallet_monthly_usage u ON u.session=l.session AND u.card_id=l.card_id AND u.month=?
-            WHERE l.session=?''', (month, session))}
-
     @app.get('/api/me/cards/{card}/monthly')
     def get_monthly_settings(card: str, request: Request):
         return monthly_settings(card, request)
@@ -552,11 +551,12 @@ def create_app(db_path):
         month = datetime.now(UTC).strftime('%Y-%m')
         with connect(db_path) as db:
             db.execute('BEGIN IMMEDIATE' if request.method == 'PUT' else 'BEGIN')
-            owner = db.execute('''SELECT 1 FROM manual_cards WHERE session=? AND card_id=?
-                UNION SELECT 1 FROM saved WHERE session=? AND cardId=?''', (session, card, session, card)).fetchone()
-            if not owner:
+            if not owns_card(db, session, card):
                 return JSONResponse({'message': 'Карта не найдена'}, 404)
-            cap, used = personal_caps(db, session, month).get(card, (None, None))
+            cap, used = db.execute('''SELECT l.limit_kopecks, u.used_kopecks
+                FROM wallet_monthly_limits l LEFT JOIN wallet_monthly_usage u
+                ON u.session=l.session AND u.card_id=l.card_id AND u.month=?
+                WHERE l.session=? AND l.card_id=?''', (month, session, card)).fetchone() or (None, None)
             if request.method == 'PUT':
                 if body is None or not {'limitKopecks', 'usedKopecks'} <= body.keys():
                     return JSONResponse({'message': 'Укажите лимит и начисления'}, 422)
@@ -566,8 +566,55 @@ def create_app(db_path):
                     return JSONResponse({'message': 'Проверьте суммы в рублях'}, 422)
                 db.execute('INSERT OR REPLACE INTO wallet_monthly_limits VALUES (?, ?, ?)', (session, card, cap))
                 db.execute('INSERT OR REPLACE INTO wallet_monthly_usage VALUES (?, ?, ?, ?)', (session, card, month, used))
+            remaining = reconciliation_view(db, session, month, card)['remainingKopecks']
+            if remaining is None and cap is not None:
+                remaining = max(0, cap - (used or 0))
             return dict(month=month, limitKopecks=cap, usedKopecks=used,
-                        remainingKopecks=None if cap is None else max(0, cap - (used or 0)))
+                        remainingKopecks=remaining)
+
+    @app.get('/api/me/cards/{card}/cashback-reconciliation')
+    def get_reconciliation(card: str, request: Request):
+        return reconcile_cashback(card, request)
+
+    @app.put('/api/me/cards/{card}/cashback-reconciliation')
+    def put_reconciliation(card: str, body: dict, request: Request):
+        return reconcile_cashback(card, request, body)
+
+    def reconcile_cashback(card, request, body=None):
+        session = require_user(request)
+        if not session:
+            return JSONResponse({'message': 'Войдите в кошелёк'}, 401)
+        now = datetime.now(UTC)
+        month = now.strftime('%Y-%m')
+        with connect(db_path) as db:
+            db.execute('BEGIN' if body is None else 'BEGIN IMMEDIATE')
+            if not owns_card(db, session, card):
+                return JSONResponse({'message': 'Карта не найдена'}, 404)
+            current = reconciliation_view(db, session, month, card)
+            if body is None:
+                return current
+            amount, ids = body.get('bankRemainingKopecks'), body.get('includedPurchaseIds')
+            if (type(amount) is not int or not 0 <= amount <= 10**12 or not isinstance(ids, list)
+                    or any(type(id_) is not int or not 0 < id_ < 2**63 for id_ in ids)):
+                return JSONResponse({'message': 'Проверьте остаток и отмеченные начисления'}, 422)
+            if body.get('month') != month:
+                return JSONResponse({'message': 'Месяц изменился. Откройте сверку заново'}, 409)
+            available = {row['purchaseId'] for row in current['accruals']}
+            included = set(ids)
+            unavailable = included - available
+            if unavailable:
+                if any(not owns_purchase(db, session, id_) for id_ in unavailable):
+                    return JSONResponse({'message': 'Покупка не найдена'}, 404)
+                return JSONResponse({'message': 'Список начислений изменился. Откройте сверку заново'}, 409)
+            # Compare the complete stored selection, including IDs hidden by a removed accrual.
+            saved = db.execute('''INSERT INTO wallet_cashback_reconciliations VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session, card_id, month) DO UPDATE SET
+                bank_remaining_kopecks=excluded.bank_remaining_kopecks,
+                reconciled_at=excluded.reconciled_at, included_ids=excluded.included_ids
+                WHERE bank_remaining_kopecks <> excluded.bank_remaining_kopecks
+                   OR included_ids <> excluded.included_ids''',
+                (session, card, month, amount, now.isoformat(), json.dumps(sorted(included))))
+            return reconciliation_view(db, session, month, card) if saved.rowcount else current
 
     @app.patch('/api/me/manual-cards/{card}/rate', status_code=204)
     def update_rate(card: str, body: dict, request: Request):
@@ -632,15 +679,45 @@ def create_app(db_path):
                     item['bankAccess'] = access
         return result
 
+    @app.post('/api/me/purchase-plan')
+    def purchase_plan(body: dict, request: Request):
+        purchases = body.get('purchases')
+        if not isinstance(purchases, list) or not 2 <= len(purchases) <= MAX_PURCHASES:
+            return JSONResponse({'message': f'Добавьте от 2 до {MAX_PURCHASES} покупок'}, 422)
+        for index, item in enumerate(purchases, 1):
+            if (not isinstance(item, dict) or not isinstance(item.get('categoryId'), str)
+                    or type(item.get('amountKopecks')) is not int or not 0 < item['amountKopecks'] <= 10**12):
+                return JSONResponse({'message': f'Проверьте категорию и сумму покупки №{index}'}, 422)
+
+        today = datetime.now(UTC).date()
+        month = today.strftime('%Y-%m')
+        with connect(db_path) as db:
+            db.execute('BEGIN')
+            rules, own = owned_rules(db, request, today=today)
+            names = catalog_names(db)
+            caps = personal_caps(db, session_id(request), month)
+        # Resolve each card's applicable rule first. The allocator spends the shared
+        # monthly balance across purchases after category limits and rounding.
+        matches = []
+        for index, item in enumerate(purchases, 1):
+            category, amount = item['categoryId'], item['amountKopecks']
+            if not known_category(category, rules, own):
+                return JSONResponse({'message': f'Выберите категорию покупки №{index}'}, 422)
+            candidates = recommend(category, amount, today, rules, own)['allMatches']
+            for candidate in candidates:
+                candidate.update(names.get(candidate['cardId'], {}))
+            matches.append(candidates)
+        return dict(month=month, **allocate_purchases(matches, caps))
+
     def known_category(category, rules, own):
         return category in CATEGORIES or (own is not None and any(
             r['categoryId'] == category and r['cardId'] in own for r in rules))
 
-    def owned_rules(db, request, catalog=None):
+    def owned_rules(db, request, catalog=None, *, today=None):
         rules = rows(db) if catalog is None else list(catalog)
         own = set(saved(db, request))
         session = session_id(request)
-        today = datetime.now(UTC).date()
+        today = today if today is not None else datetime.now(UTC).date()
         banks = bank_names()
         for card in manual_cards(db, request):
             own.add(card['cardId'])
@@ -716,7 +793,7 @@ def create_app(db_path):
                 best = result['top3'][0]
                 usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
                 usual_hit = next((item for item in result['allMatches'] if usual and item['cardId'] == usual[0]), None)
-                db.execute(f'''INSERT INTO {wallet_purchase_table(db)}
+                entry = db.execute(f'''INSERT INTO {wallet_purchase_table(db)}
                     (session, bought_on, category_id, amount_kopecks,
                      recommended_card, recommended_name, recommended_kopecks,
                      chosen_card, chosen_name, chosen_kopecks, usual_kopecks, catalog_version)
@@ -726,12 +803,34 @@ def create_app(db_path):
                      picked['cardId'], picked['cardName'], picked['cashbackKopecks'],
                      None if usual_hit is None else usual_hit['cashbackKopecks'],
                      result['catalogVersion']))
-                payload = {'calculatedKopecks': picked['cashbackKopecks'], 'recommendedKopecks': best['cashbackKopecks']}
+                payload = {'id': entry.lastrowid, 'calculatedKopecks': picked['cashbackKopecks'], 'recommendedKopecks': best['cashbackKopecks']}
                 if request_key is not None:
                     monthly.remember(db, session, 'purchase', request_key, digest, payload)
                 return payload
         except monthly.Invalid as error:
             return JSONResponse({'message': str(error)}, error.status)
+
+    @app.put('/api/me/purchases/{purchase_id}/cashback', status_code=204)
+    def set_actual_cashback(purchase_id: int, body: dict, request: Request):
+        session = require_user(request)
+        if not session:
+            return JSONResponse({'message': 'Войдите в кошелёк'}, 401)
+        amount = body.get('amountKopecks')
+        if 'amountKopecks' not in body or (amount is not None and
+                (type(amount) is not int or not 0 <= amount <= 10**12)):
+            return JSONResponse({'message': 'Проверьте сумму начисления'}, 422)
+        with connect(db_path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not owns_purchase(db, session, purchase_id):
+                return JSONResponse({'message': 'Покупка не найдена'}, 404)
+            if amount is None:
+                db.execute('DELETE FROM wallet_actual_cashback WHERE session=? AND purchase_id=?',
+                           (session, purchase_id))
+            else:
+                db.execute('''INSERT INTO wallet_actual_cashback VALUES (?, ?, ?)
+                    ON CONFLICT(session, purchase_id) DO UPDATE SET amount_kopecks=excluded.amount_kopecks''',
+                    (session, purchase_id, amount))
+        return Response(status_code=204)
 
     @app.get('/api/me/stats')
     def stats(request: Request, month: str | None = None):
@@ -745,24 +844,31 @@ def create_app(db_path):
             return JSONResponse({'message': 'Укажите месяц в формате ГГГГ-ММ'}, 422)
         with connect(db_path) as db:
             usual = db.execute('SELECT card_id FROM usual_card WHERE session = ?', (session,)).fetchone()
-            raw = db.execute(f'''SELECT bought_on, category_id, amount_kopecks, recommended_name, recommended_kopecks,
-                chosen_name, chosen_kopecks, usual_kopecks, chosen_card FROM {wallet_purchase_table(db)}
-                WHERE session = ? AND bought_on LIKE ? ORDER BY id DESC''', (session, month + '%')).fetchall()
+            raw = db.execute(f'''SELECT bought_on, category_id, p.amount_kopecks, recommended_name, recommended_kopecks,
+                chosen_name, chosen_kopecks, usual_kopecks, chosen_card, p.id, a.amount_kopecks
+                FROM {wallet_purchase_table(db)} p LEFT JOIN wallet_actual_cashback a
+                ON a.session=p.session AND a.purchase_id=p.id
+                WHERE p.session = ? AND bought_on LIKE ? ORDER BY p.id DESC''', (session, month + '%')).fetchall()
         items = [dict(date=row[0], categoryId=row[1], amountKopecks=row[2], recommendedName=row[3],
-                      recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7])
+                      recommendedKopecks=row[4], chosenName=row[5], chosenKopecks=row[6], usualKopecks=row[7], cardId=row[8], id=row[9], actualCashbackKopecks=row[10])
                  for row in raw]
         by_card = {}
-        for row in raw:
-            card_id = row[8]
-            summary = by_card.setdefault(card_id, dict(cardId=card_id, name=row[5], count=0,
-                                                       spentKopecks=0, cashbackKopecks=0))
-            summary['count'] += 1
-            summary['spentKopecks'] += row[2]
-            summary['cashbackKopecks'] += row[6]
-        cards = sorted(by_card.values(), key=lambda card: (-card['cashbackKopecks'], card['name'], card['cardId']))
+        for item in items:
+            by_card.setdefault(item['cardId'], []).append(item)
+        cards = []
+        for card_id, purchases in by_card.items():
+            totals = month_totals(purchases)
+            cards.append(dict(
+                cardId=card_id, name=purchases[0]['chosenName'], count=totals['count'],
+                spentKopecks=sum(item['amountKopecks'] for item in purchases),
+                cashbackKopecks=totals['calculatedKopecks'], missedKopecks=totals['missedKopecks'],
+                actualCashbackKopecks=totals['actualCashbackKopecks'],
+                actualCashbackCount=totals['actualCashbackCount'],
+            ))
+        cards.sort(key=lambda card: (-card['cashbackKopecks'], card['name'], card['cardId']))
         return {'month': month, 'usualCardId': usual[0] if usual else None, 'purchases': items, 'cards': cards,
                 **month_totals(items),
-                'note': 'Это расчёт по записанным покупкам, не начисление банка. Остаток месячного лимита по операциям не считаем.'}
+                'note': 'Статистика по покупкам, записанным в КопиКэше. Фактические начисления добавляются вручную.'}
 
     @app.delete('/api/me/usual-card', status_code=204)
     def clear_usual(request: Request):

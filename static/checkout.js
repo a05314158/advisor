@@ -24,7 +24,7 @@ const checkout = (() => {
   function button(text,fn,cl='buy-secondary'){const b=node('button',text,cl);b.type='button';b.onclick=fn;return b;}
   const amountText = n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n/100)+' ₽';
   const day = d=>new Intl.DateTimeFormat('ru-RU',{timeZone:'UTC'}).format(new Date(d+'T00:00:00Z'));
-  function parse(raw){
+  function parse(raw, allowZero = false){
     const t=raw.trim(); if(!t)return {msg:'Введите сумму покупки.'};
     if(t.startsWith('-'))return {msg:'Сумма не может быть отрицательной.'};
     if(/[.,]\d{3,}$/.test(t))return {msg:'Укажите не больше двух знаков после запятой.'};
@@ -32,7 +32,7 @@ const checkout = (() => {
     if(!m)return {msg:'Введите сумму целиком, например 2 500,50.'};
     const value=Number(m[1].replace(/\s/g,''))*100+Number((m[2]||'').padEnd(2,'0'));
     if(value>1e12)return {msg:'Максимальная сумма — 10 000 000 000 ₽.'};
-    return value?{value}:{msg:'Сумма должна быть больше нуля.'};
+    return value||allowZero?{value}:{msg:'Сумма должна быть больше нуля.'};
   }
   const label=id=>categories[id]||id;
   function paint(){
@@ -98,6 +98,131 @@ const checkout = (() => {
   el('changeCategory').onclick=()=>{expanded=!expanded;paint();if(expanded)el('categoryGrid').querySelector('[aria-pressed=true]')?.focus();};
   el('moreCategories').onclick=()=>{more=!more;paint();if(more)el('categoryGrid').children[6]?.focus();};
   field.oninput=queue;el('clearAmount').onclick=()=>{field.value='';field.focus();queue();};
-  function refresh(){if(owner!==deviceLogin){owner=deviceLogin;selected='';field.value='';expanded=true;more=false;}paint();if(!el('buyPanel').hidden)queue();}
-  return {refresh,open(){refresh();el('buyTitle').focus({preventScroll:true});}};
+  const plan = el('purchasePlan');
+  const planRows = el('purchasePlanRows');
+  const planStatus = el('purchasePlanStatus');
+  const planResult = el('purchasePlanResult');
+  const planSubmit = el('purchasePlanSubmit');
+  const planAdd = el('purchasePlanAdd');
+  const maxPlanRows = 8;
+  let planEpoch = 0;
+
+  function clearPlanResult(){
+    planEpoch++;
+    planResult.replaceChildren();
+    planStatus.textContent = '';
+    planSubmit.disabled = false;
+  }
+
+  function updatePlanRows(){
+    for (const [index, row] of Array.from(planRows.children).entries()){
+      row.querySelector('legend').textContent = 'Покупка ' + (index + 1);
+      const select = row.querySelector('select');
+      const category = select.value;
+      select.replaceChildren(new Option('Выберите категорию', ''),
+        ...Object.entries(categories).map(([id, name]) => new Option(name, id)));
+      select.value = Object.hasOwn(categories, category) ? category : '';
+      const remove = row.querySelector('button');
+      remove.disabled = planRows.children.length <= 2;
+      remove.setAttribute('aria-label', 'Удалить покупку ' + (index + 1));
+    }
+    planAdd.disabled = planRows.children.length >= maxPlanRows;
+  }
+
+  function addPlanRow(){
+    const row = node('fieldset');
+    const select = node('select');
+    select.required = true;
+    const categoryLabel = node('label', 'Категория');
+    categoryLabel.append(select);
+    const amount = node('input');
+    amount.inputMode = 'decimal';
+    amount.placeholder = 'Например, 1 000';
+    amount.required = true;
+    const amountLabel = node('label', 'Сумма, ₽');
+    amountLabel.append(amount);
+    const remove = button('Удалить', () => {
+      row.remove();
+      updatePlanRows();
+      clearPlanResult();
+      planAdd.focus();
+    });
+    row.append(node('legend'), categoryLabel, amountLabel, remove);
+    planRows.append(row);
+    updatePlanRows();
+    return select;
+  }
+
+  function showPlan(data, purchases){
+    const heading = node('h3', 'Ожидаемый кэшбэк: ' + amountText(data.optimized.totalKopecks));
+    const comparison = node('p', 'При выборе лучшей карты для каждой покупки по очереди: '
+      + amountText(data.sequential.totalKopecks) + '.');
+    const list = node('ol');
+    data.optimized.purchases.forEach((item, index) => {
+      const purchase = purchases[index];
+      const card = item.cardId
+        ? (item.bankName === item.cardName ? item.cardName : item.bankName + ' · ' + item.cardName)
+        : 'Нет карты с положительным кэшбэком';
+      const line = node('li');
+      line.append(node('strong', label(purchase.categoryId) + ' · ' + amountText(purchase.amountKopecks)),
+        node('span', card + ' · ' + amountText(item.cashbackKopecks)));
+      list.append(line);
+    });
+    planResult.append(heading, comparison);
+    if (data.gainKopecks) planResult.append(node('p', '+' + amountText(data.gainKopecks) + ' за весь план', 'purchase-plan-gain'));
+    if (data.assumedFullCardIds.length) planResult.append(node('p',
+      'По некоторым картам начисления за месяц неизвестны. Для них расчёт предполагает полный лимит.', 'buy-note'));
+    planResult.append(list);
+  }
+
+  plan.addEventListener('toggle', () => {
+    if (plan.open && !planRows.children.length) {
+      addPlanRow();
+      addPlanRow();
+    }
+  });
+  planAdd.onclick = () => {
+    if (planRows.children.length >= maxPlanRows) return;
+    clearPlanResult();
+    addPlanRow().focus();
+  };
+  el('purchasePlanForm').oninput = event => {
+    event.target.removeAttribute('aria-invalid');
+    clearPlanResult();
+  };
+  el('purchasePlanForm').onsubmit = async event => {
+    event.preventDefault();
+    if (planSubmit.disabled) return;
+    clearPlanResult();
+    const purchases = [];
+    for (const [index, row] of Array.from(planRows.children).entries()){
+      const input = row.querySelector('input');
+      const {value, msg} = parse(input.value);
+      if (!value){
+        input.setAttribute('aria-invalid', 'true');
+        planStatus.textContent = 'Покупка ' + (index + 1) + '. ' + msg;
+        input.focus();
+        return;
+      }
+      purchases.push({categoryId: row.querySelector('select').value, amountKopecks: value});
+    }
+    const ticket = planEpoch;
+    planSubmit.disabled = true;
+    planStatus.textContent = 'Сравниваем варианты…';
+    try {
+      const data = await api('/api/me/purchase-plan', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({purchases})
+      });
+      if (ticket !== planEpoch) return;
+      showPlan(data, purchases);
+      planStatus.textContent = 'План рассчитан.';
+    } catch (error) {
+      if (ticket === planEpoch) planStatus.textContent = error.message;
+    } finally {
+      if (ticket === planEpoch) planSubmit.disabled = false;
+    }
+  };
+
+  function refresh(){if(owner!==deviceLogin){owner=deviceLogin;selected='';field.value='';expanded=true;more=false;plan.open=false;planRows.replaceChildren();}clearPlanResult();updatePlanRows();paint();if(!el('buyPanel').hidden)queue();}
+  return {parseAmount: parse,refresh,open(){refresh();el('buyTitle').focus({preventScroll:true});}};
 })();

@@ -94,6 +94,7 @@ function applyWalletRoute(route){
   }
   markRoute(route);
   if(route==='cards' && $('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot(); applyCarouselTransforms();}
+  if(route==='home') renderHomeCashback();
   if(route==='history') renderHistory();
   if(route==='account') openSettings();
   const focus={home:'homeTitle',cards:'cards-title',history:'historyTitle',account:'accountTitle'}[route];
@@ -208,11 +209,161 @@ function dayTitle(iso){
   if(!iso) return 'Без даты';
   return new Intl.DateTimeFormat('ru-RU',{day:'numeric', month:'long', timeZone:'UTC'}).format(new Date(iso.slice(0,10)+'T12:00:00Z'));
 }
+let homeCashbackRequest = 0, journalRequest = 0;
+
+function cashbackText(tag, text, className = ''){
+  return Object.assign(document.createElement(tag), {textContent: text, className});
+}
+
+function cashbackButton(label, action, className = 'secondary-action'){
+  return Object.assign(cashbackText('button', label, className), {type: 'button', onclick: action});
+}
+
+function cashbackMetric(label, value){
+  const metric = document.createElement('p');
+  metric.append(cashbackText('span', label), cashbackText('strong', value, 'money'));
+  return metric;
+}
+
+async function renderHomeCashback(){
+  const host = $('homeCashback');
+  const ticket = ++homeCashbackRequest;
+  host.setAttribute('aria-busy', 'true');
+  host.replaceChildren(cashbackText('p', 'Загружаем сводку…', 'journal-meta'));
+  try {
+    const data = await api('/api/me/stats');
+    if (ticket !== homeCashbackRequest) return;
+    host.replaceChildren(cashbackText('p', monthTitle(data.month), 'journal-month'));
+    if (!data.count){
+      host.append(cashbackText('p', 'За этот месяц покупок пока нет.', 'journal-meta'));
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'month-cashback-grid';
+    const actual = document.createElement('div');
+    actual.className = 'month-cashback-actual';
+    actual.append(cashbackText('span', 'Получено', 'month-cashback-kicker'));
+    actual.append(data.actualCashbackKopecks == null
+      ? cashbackText('span', '—', 'month-cashback-pending')
+      : cashbackText('strong', money(data.actualCashbackKopecks), 'money'));
+    const estimates = document.createElement('div');
+    estimates.className = 'month-cashback-side';
+    estimates.append(cashbackMetric('По расчёту', money(data.calculatedKopecks)),
+      cashbackMetric('Могли получить ещё', money(data.missedKopecks)));
+    grid.append(actual, estimates);
+    host.append(grid, cashbackText('p', data.actualCashbackCount
+      ? `Подтверждено по ${data.actualCashbackCount} из ${data.count} записанных покупок`
+      : 'Нет подтверждённых начислений', 'month-cashback-meta'));
+    if (data.cards?.length){
+      const breakdown = document.createElement('details');
+      breakdown.className = 'month-cashback-cards';
+      breakdown.append(cashbackText('summary', 'По картам'));
+      const list = document.createElement('ul');
+      for (const card of data.cards){
+        const row = document.createElement('li');
+        const actual = card.actualCashbackKopecks == null
+          ? 'Начисления не подтверждены' : 'Получили ' + money(card.actualCashbackKopecks);
+        const values = document.createElement('span');
+        values.className = 'vals';
+        values.append(cashbackText('span', actual), cashbackText('span', 'По расчёту ' + money(card.cashbackKopecks)));
+        row.append(cashbackText('strong', card.name || card.cardId, 'name'), values);
+        list.append(row);
+      }
+      breakdown.append(list);
+      host.append(breakdown);
+    }
+    host.append(cashbackButton('Покупки за месяц', () => {
+      historyMonth = data.month;
+      walletRoute('history');
+    }, 'month-cashback-journal'));
+  } catch (error) {
+    if (ticket !== homeCashbackRequest) return;
+    host.replaceChildren(cashbackText('p', error.message || 'Не удалось загрузить сводку.', 'journal-meta'),
+      cashbackButton('Повторить', renderHomeCashback));
+  } finally {
+    if (ticket === homeCashbackRequest) host.removeAttribute('aria-busy');
+  }
+}
+
+function actualCashbackForm(item){
+  const form = document.createElement('form');
+  form.className = 'journal-actual';
+  const label = cashbackText('label', 'Сколько начислил банк, ₽');
+  const input = document.createElement('input');
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.placeholder = 'Например, 48,50';
+  const current = cashbackText('p', '', 'journal-actual-note');
+  const status = cashbackText('p', '');
+  status.setAttribute('role', 'status');
+  status.id = 'cashback-status-' + item.id;
+  input.setAttribute('aria-describedby', status.id);
+  label.append(input);
+  const save = cashbackButton('Сохранить', null, 'primary');
+  save.type = 'submit';
+  const clear = cashbackButton('Удалить отметку', () => update(null), '');
+  const actions = document.createElement('div');
+  actions.className = 'journal-actual-actions';
+  actions.append(save, clear);
+  form.append(cashbackText('h4', 'Фактический кэшбэк'), label, current, actions, status);
+
+  function renderValue(){
+    const amount = item.actualCashbackKopecks;
+    current.textContent = amount == null ? 'Не подтверждено' : 'Подтверждено: ' + money(amount);
+    input.value = amount == null ? '' : String(amount / 100).replace('.', ',');
+    clear.hidden = amount == null;
+  }
+
+  async function update(amount){
+    if (save.disabled) return;
+    input.removeAttribute('aria-invalid');
+    save.disabled = clear.disabled = input.disabled = true;
+    status.textContent = 'Сохраняем…';
+    try {
+      await api(`/api/me/purchases/${item.id}/cashback`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({amountKopecks: amount})
+      });
+      item.actualCashbackKopecks = amount;
+      renderValue();
+      status.textContent = amount == null ? 'Отметка удалена.' : 'Начисление сохранено.';
+      // A user can return home while the save is in flight.
+      if (!$('hero').hidden && !$('appScreen').hidden) renderHomeCashback();
+    } catch (error) {
+      status.textContent = error.message || 'Не удалось сохранить. Повторите попытку.';
+    } finally {
+      save.disabled = clear.disabled = input.disabled = false;
+    }
+  }
+
+  input.oninput = () => {
+    input.removeAttribute('aria-invalid');
+    status.textContent = '';
+  };
+  form.onsubmit = event => {
+    event.preventDefault();
+    const {value, msg} = checkout.parseAmount(input.value, true);
+    if (msg){
+      input.setAttribute('aria-invalid', 'true');
+      status.textContent = msg === 'Введите сумму покупки.' ? 'Введите сумму начисления.' : msg;
+      input.focus();
+      return;
+    }
+    update(value);
+  };
+  renderValue();
+  return form;
+}
+
 async function renderHistory(){
+  const ticket = ++journalRequest;
   const host=$('historyBody'); host.className='journal is-loading'; host.textContent='Загружаем историю…';
   try{
     const query=historyMonth?`?month=${encodeURIComponent(historyMonth)}`:'';
-    const data=await api('/api/me/stats'+query); host.className='journal'; host.replaceChildren();
+    const data=await api('/api/me/stats'+query);
+    if (ticket !== journalRequest) return;
+    host.className='journal'; host.replaceChildren();
     if($('historyMonth') && data.month) $('historyMonth').value=data.month;
     historyMonth=data.month;
     const summary=document.createElement('section'); summary.className='journal-summary';
@@ -250,12 +401,14 @@ async function renderHistory(){
         const best=document.createElement('p'); best.textContent=`Лучшая по расчёту: ${item.recommendedName||'—'}${item.recommendedKopecks==null?'':`, ${money(item.recommendedKopecks)}`}`;
         const diff=document.createElement('p'); diff.textContent=`Разница: ${item.recommendedKopecks==null||item.chosenKopecks==null?'—':money(gap)}`;
         detail.append(chosen, best, diff);
+        if (item.id != null) detail.append(actualCashbackForm(item));
         row.onclick=()=>{detail.hidden=!detail.hidden; row.setAttribute('aria-expanded', String(!detail.hidden));};
         list.append(row, detail);
       });
       host.append(list);
     });
   }catch(error){
+    if (ticket !== journalRequest) return;
     host.className='journal is-error'; host.replaceChildren();
     const message=document.createElement('p'); message.textContent=error.message||'Не удалось загрузить историю.';
     const retry=document.createElement('button'); retry.type='button'; retry.textContent='Повторить загрузку'; retry.onclick=()=>renderHistory();

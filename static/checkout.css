@@ -26,3 +26,18 @@ html[data-theme=dark] #buyPanel{--sheet:#232421;--stroke:#949289;--quiet:#c7c4ba
 #buyResults .advice-row,.record-form{background:var(--sheet);border:1px solid var(--line);border-radius:12px;padding:16px}.advice-cat{font-weight:600}#buyResults dl{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);font-size:14px;gap:8px;margin:4px 0}#buyResults dd{margin:0}#buyResults dt{opacity:.82}.record-form{display:grid;gap:8px}.record-form p{font-size:14px}#buyPanel :focus-visible{outline:3px solid #116eb4;outline-offset:2px}html[data-theme=dark] #buyPanel :focus-visible,.advice-winner :focus-visible{outline:3px solid #ffc928}
 @keyframes advice-appear{from{opacity:0;transform:translateY(3px)}}@media(prefers-reduced-motion:reduce){#buyPanel *,#buyPanel *::before{animation:none!important;transition:none!important}}
 @media(min-width:800px){#appScreen.page:has(#buyPanel:not([hidden])){width:min(100%,1000px);padding:24px 40px}#appScreen:has(#buyPanel:not([hidden])) :is(.topbar,.content){width:100%}.buy-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px}.buy-advice{border-left:1px solid var(--line);padding-left:28px}}
+
+.purchase-plan{margin-block-start:20px;padding:12px 16px;background:var(--sheet);border:1px solid var(--stroke);border-radius:14px}
+.purchase-plan summary{min-height:44px;padding-block:10px;cursor:pointer;font-weight:700}
+#purchasePlanForm,#purchasePlanRows{display:grid;gap:12px}
+.purchase-plan fieldset{min-width:0;display:grid;gap:8px;padding:10px 12px 12px;margin:0;border:1px solid var(--stroke);border-radius:10px}
+.purchase-plan legend{font-weight:600;padding-inline:4px}
+.purchase-plan label{display:grid;gap:4px}
+.purchase-plan :is(select,input){width:100%;min-width:0;min-height:44px;padding:8px;border:1px solid var(--stroke);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.purchase-plan button:disabled{opacity:.55;cursor:default}
+.purchase-plan-actions{display:flex;flex-wrap:wrap;gap:8px}
+#purchasePlanStatus:empty,#purchasePlanResult:empty{display:none}
+#purchasePlanResult ol{padding-inline-start:22px;margin-bottom:0}
+#purchasePlanResult li{padding-block:6px;overflow-wrap:anywhere}
+#purchasePlanResult li span{display:block}
+.purchase-plan-gain{font-weight:700}
