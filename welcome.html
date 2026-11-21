@@ -3,11 +3,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Советник — больше кэшбэка</title>
+<link rel="stylesheet" href="/static/tokens.css">
 <style>
 :root {
-  --paper:#f6f3ed; --ink:#171714; --yellow:#ffcd16;
+  --paper:#F5F3EE; --ink:#1D1E1A; --yellow:#FFD84D;
   --glow:.32; --lift:8%; --shine-time:1100ms;
-  font-family:Arial,Helvetica,sans-serif; color:var(--ink); background:var(--paper);
+  font-family:Onest,system-ui,sans-serif; color:var(--ink); background:var(--paper);
 }
 * {box-sizing:border-box}
 body {margin:0}
@@ -16,7 +17,7 @@ button:focus-visible {outline:3px solid #815500;outline-offset:5px}
 main {max-width:480px;margin:auto;min-height:100svh;padding:clamp(20px,4vh,40px) 24px max(22px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:clamp(12px,2.5vh,26px)}
 .brand {display:flex;align-items:center;gap:9px;font-size:24px;font-weight:800;letter-spacing:-1.2px}
 .mark {position:relative;width:26px;height:28px;display:inline-block}
-.mark::before,.mark::after {content:'';position:absolute;width:16px;height:22px;top:1px;left:9px;border-radius:3px;background:#e6ae00;transform:skewY(-15deg)}
+.mark::before,.mark::after {content:'';position:absolute;width:16px;height:22px;top:1px;left:9px;border-radius:3px;background:#E6B423;transform:skewY(-15deg)}
 .mark::after {top:5px;left:1px;background:var(--yellow);transform:skewY(8deg)}
 h1 {font-size:clamp(34px,8.6vw,48px);line-height:.99;letter-spacing:-.062em;margin:10px 0 12px;font-weight:800}
 p {font-size:clamp(16px,4.5vw,20px);line-height:1.32;margin:0;max-width:29ch;color:#484740}

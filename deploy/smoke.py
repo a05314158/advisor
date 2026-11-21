@@ -19,7 +19,7 @@ def check(base, revision=None):
         raise ValueError(f'Unexpected health status or revision: {health}')
     if not read(base, '/'):
         raise ValueError('Home page is empty')
-    categories = json.loads(read(base, '/api/categories'))
+    categories = json.loads(read(base, '/api/meta'))['categories']
     if category not in categories:
         raise ValueError('Supermarkets are missing')
     products = json.loads(read(base, '/api/cards?categoryId=' + category))

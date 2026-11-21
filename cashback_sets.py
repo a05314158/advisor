@@ -189,7 +189,9 @@ def confirm(db, session, body, today):
     old = db.execute('SELECT rules_json FROM cashback_sets WHERE session=? AND card_id=? AND month=? AND mode=?',
                      (session,card,month,mode)).fetchone()
     merged = {r['label']:r for r in json.loads(old[0])} if old else {}
-    merged.update({r['label']:r for r in rules})
+    merged.update({r['label']: {**r, 'updatedOn': today} for r in rules})
+    if mode == 'active' and slots is not None and len(merged) > slots:
+        raise Invalid('Подключённых категорий больше, чем разрешает банк')
     if len(merged) > MAX_ROWS:
         raise Invalid('Слишком много категорий для одной карты')
     merged = list(merged.values())

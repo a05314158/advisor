@@ -1,6 +1,12 @@
+import tempfile
 import unittest
+from datetime import UTC, datetime
+from pathlib import Path
+from unittest.mock import patch
 
 from advisor import month_totals
+from catalog import initialize
+from test_cashback import API
 
 
 class MonthTotals(unittest.TestCase):
@@ -21,3 +27,42 @@ class MonthTotals(unittest.TestCase):
         ])
         self.assertIsNone(totals['usualKopecks'])
         self.assertIsNone(totals['versusUsualKopecks'])
+
+
+class StatsMonthQuery(unittest.TestCase):
+    def test_month_defaults_to_current_utc_and_filters_by_query(self):
+        with tempfile.TemporaryDirectory() as folder, patch('advisor.datetime') as clock:
+            clock.now.return_value = datetime(2026, 11, 20, tzinfo=UTC)
+            path = Path(folder) / 'advisor.sqlite3'
+            initialize(path)
+            from advisor import create_app
+            app = create_app(path)
+            with API(app) as client, API(app) as stranger:
+                self.assertEqual(stranger.get('/api/me/stats').status_code, 401)
+                self.assertEqual(client.post('/api/auth/register', json={
+                    'login': 'stats_month', 'password': 'test-only-long-password',
+                }).status_code, 201)
+                card = client.post('/api/me/manual-cards', json={
+                    'name': 'Карта',
+                    'rules': [{'categoryId': 'cafe', 'rateBps': 500, 'validFrom': '2026-01-01'}],
+                }).json()['cardId']
+                purchase = {'chosenCardId': card, 'categoryId': 'cafe', 'amountKopecks': 10000}
+                self.assertEqual(client.post('/api/me/purchases', json={
+                    **purchase, 'requestId': 'stats-month-nov-0001',
+                }).status_code, 201)
+                current = client.get('/api/me/stats').json()
+                self.assertEqual(current['month'], '2026-11')
+                self.assertEqual(current['count'], 1)
+                november = client.get('/api/me/stats?month=2026-11').json()
+                self.assertEqual(november['month'], '2026-11')
+                self.assertEqual(november['count'], 1)
+                october = client.get('/api/me/stats?month=2026-10').json()
+                self.assertEqual(october['month'], '2026-10')
+                self.assertEqual(october['count'], 0)
+                self.assertEqual(client.get('/api/me/stats?month=2026-13').status_code, 422)
+                self.assertEqual(client.get('/api/me/stats?month=bad').status_code, 422)
+                self.assertEqual(stranger.post('/api/auth/register', json={
+                    'login': 'stats_other', 'password': 'test-only-long-password',
+                }).status_code, 201)
+                other = stranger.get('/api/me/stats?month=2026-11').json()
+                self.assertEqual(other['count'], 0)

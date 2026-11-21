@@ -1,153 +1,237 @@
-/* Cashback drafts live only in memory. The planner never writes bank selections. */
+/* Drafts are kept only in memory. Planning never writes bank selections. */
 (() => {
   'use strict';
   const review = $('catalogDialog'), planner = $('planDialog');
-  let draftEpoch = 0, planEpoch = 0, busy = false, fromPlan = false, target, replay, image = '';
   const sessionOffers = new Map();
-  const node = (tag, text, cls) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el; };
-  const bankName = id => banks.find(b => b.id === id)?.name || id;
-  const monthAt = delta => { const now = new Date(); return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + delta, 1)).toISOString().slice(0, 7); };
-  const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-  const post = (url, body, timeout) => api('/api/me/' + url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}, timeout);
-  const messages = {401:'Сессия закончилась. Войдите снова.', 403:'Нет доступа к этой карте.', 404:'Карта больше не доступна. Обновите кошелёк.', 409:'Условия изменились или у банка несколько карт. Проверьте выбранную карту.', 422:'Проверьте месяц и значения в строках.', 429:'Слишком много запросов. Повторите позже.', 502:'Распознавание недоступно. Повторите позже или введите условия вручную.'};
-  function fail(error, out) {
-    out.textContent = (error.status && !['Не удалось выполнить запрос.','Проверьте введённую сумму.'].includes(error.message) ? error.message : messages[error.status]) || (error.name === 'TimeoutError' ? 'Сервер не ответил вовремя. Повторите запрос.' : error.message);
-    if (error.status === 401) { toast(messages[401]); dismissAll(); deviceLogin = null; $('appScreen').hidden = true; $('authScreen').hidden = false; showRemembered(); }
+  let draftEpoch = 0, planEpoch = 0, busy = false, dirty = false, planDirty = false;
+  let mode, target, replay, image = '', origin, planOrigin, source, suggestedMonth;
+  const node = (tag,text,cls) => { const el=document.createElement(tag); if(text!=null) el.textContent=text; if(cls) el.className=cls; return el; };
+  const action = (label,fn) => {const el=node('button',label); el.type='button'; el.onclick=fn; return el;};
+  const bankName = id => banks.find(b=>b.id===id)?.name || id;
+  const monthAt = delta => {const now=new Date(); return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+delta,1)).toISOString().slice(0,7);};
+  const periodName = month => new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(month+'-01T12:00:00Z'));
+  const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+  const post = (url,body,timeout) => api('/api/me/'+url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},timeout);
+  const offerKey = (card,month) => JSON.stringify([deviceLogin,card,month]);
+  const messages = {401:'Сессия закончилась. Войдите снова.',403:'Нет доступа к этой карте.',404:'Карта не найдена. Обновите кошелёк.',409:'Условия изменились. Проверьте карту.',422:'Проверьте месяц и значения в строках.',429:'Слишком много запросов. Повторите позже.',502:'Распознавание недоступно. Введите условия вручную или повторите позже.'};
+  function fail(error,out) {
+    out.textContent = (error.status && !['Не удалось выполнить запрос.','Проверьте введённую сумму.'].includes(error.message) ? error.message : messages[error.status]) || (error.name==='TimeoutError'?'Сервер не ответил вовремя. Повторите запрос.':error.message);
+    if(error.status===401){toast(messages[401]); clearShot(); invalidatePlan(); dirty=planDirty=false; review.hidden=planner.hidden=true; sessionOffers.clear(); $('reviewRows').replaceChildren(); deviceLogin=null; $('appScreen').hidden=true; $('authScreen').hidden=false; showRemembered();}
   }
-  function invalidatePlan() { ++planEpoch; $('planResult').replaceChildren(); $('planError').textContent = ''; $('calculatePlan').disabled = false; }
-  function clearShot() { ++draftEpoch; image = ''; $('cashbackShot').value = ''; $('shotPreview').textContent = 'Снимок из банка · JPG, PNG или WebP'; $('confirmCard').disabled = false; $('confirmCard').textContent = 'Прочитать снимок'; $('shotError').textContent = ''; }
-  function dismissAll() { clearShot(); invalidatePlan(); review.hidden = planner.hidden = true; $('reviewRows').replaceChildren(); sessionOffers.clear(); }
-  function cardOptions(preferred) {
-    const matches = manual.filter(c => c.bankId === $('bankId').value || (!c.bankId && c.name === bankName($('bankId').value)));
-    $('cashbackCard').replaceChildren(new Option('По банку (если карты нет — создать)', ''));
-    matches.forEach((c, i) => $('cashbackCard').append(new Option(c.name + (matches.length > 1 ? ` · карта ${i+1}` : ''), c.cardId)));
-    $('cashbackCard').value = matches.some(c => c.cardId === preferred) ? preferred : matches.length === 1 ? matches[0].cardId : '';
+  function invalidatePlan(){++planEpoch; $('planResult').replaceChildren(); $('planError').textContent=''; $('calculatePlan').disabled=false; const forecast=$('planForecast'); if(forecast){forecast.hidden=true; forecast.textContent='';}}
+  function clearShot(){++draftEpoch; image=''; $('cashbackShot').value=''; $('shotPreview').textContent='Снимок из банка · JPG, PNG или WebP'; $('confirmCard').disabled=true; $('confirmCard').textContent='Прочитать снимок'; $('shotError').textContent='';}
+  function cardOptions(preferred){
+    const bank=$('bankId').value, matches=manual.filter(c=>c.bankId===bank || (!c.bankId && c.name===bankName(bank)));
+    $('cashbackCard').replaceChildren(new Option(matches.length?'Выберите карту':'Создать карту при сохранении',''));
+    matches.forEach((c,i)=>$('cashbackCard').append(new Option(c.name+(matches.length>1?` · карта ${i+1}`:''),c.cardId)));
+    $('cashbackCard').value=matches.some(c=>c.cardId===preferred)?preferred:matches.length===1?matches[0].cardId:'';
   }
-  function chooseTarget() {
-    if (!$('bankId').value) throw new Error('Выберите банк.');
-    if ($('cashbackCard').options.length > 2 && !$('cashbackCard').value) throw new Error('У банка несколько карт. Выберите конкретную карту.');
-    return {bankId:$('bankId').value, cardId:$('cashbackCard').value || undefined};
+  function showStep(id,title,focus){
+    for(const key of ['decisionStep','screenshotForm','reviewForm']) $(key).hidden=key!==id;
+    $('dialogTitle').textContent=title; $('shotError').textContent=''; review.querySelector('.dialog-card').scrollTop=0; $(focus).focus();
   }
-  $('addCashbackBtn').addEventListener('click', () => {
-    clearShot(); fromPlan = false; review.hidden = false; $('screenshotForm').hidden = false; $('reviewForm').hidden = true;
-    const c = carouselPos.all[mod(Math.round(carouselPos.value), carouselPos.all.length)];
-    const bank = banks.find(b => b.id === c?.bankId || b.name === c?.name);
-    if (bank) $('bankId').value = bank.id;
-    cardOptions(c?.cardId); $('bankId').focus();
-  });
-  $('bankId').onchange = () => { clearShot(); cardOptions(); };
-  $('cashbackCard').onchange = clearShot;
-  $('cashbackShot').onchange = async () => {
-    const token = ++draftEpoch, file = $('cashbackShot').files[0]; image = ''; $('shotError').textContent = '';
-    if (!file) return clearShot();
-    $('shotPreview').textContent = 'Читаем снимок…'; $('confirmCard').disabled = true;
-    try { if (file.size > 4000000) throw new Error('Скриншот больше 4 МБ'); const data = await readShot(file); if (token !== draftEpoch) return; image = data; const img = node('img'); img.alt = 'Предпросмотр скриншота'; img.src = image; $('shotPreview').replaceChildren(img); }
-    catch (e) { if (token === draftEpoch) { $('shotPreview').textContent = 'Выберите другой снимок'; fail(e, $('shotError')); } }
-    finally { if (token === draftEpoch) { $('confirmCard').disabled = false; $('confirmCard').textContent = 'Прочитать снимок'; } }
+  function openDecision(trigger,month){
+    origin=trigger; suggestedMonth=month; dirty=false; clearShot(); planner.hidden=true; review.hidden=false;
+    const all=carouselPos.all, c=all.length?all[mod(Math.round(carouselPos.value),all.length)]:null;
+    const bank=banks.find(b=>b.id===c?.bankId || b.name===c?.name); if(bank) $('bankId').value=bank.id;
+    cardOptions(c?.cardId); showStep('decisionStep','Условия кэшбэка','bankId');
+  }
+  $('addCashbackBtn').addEventListener('click',e=>openDecision(e.currentTarget));
+  $('bankId').onchange=()=>cardOptions();
+  function choose(value){
+    const bankId=$('bankId').value, cardId=$('cashbackCard').value;
+    if(!bankId || (!cardId && $('cashbackCard').options.length>1)){fail(new Error('Выберите банк и карту.'),$('shotError'));return;}
+    target={bankId,cardId:cardId||undefined}; mode=value;
+    $('entryContext').textContent=bankName(bankId)+(mode==='offer'?' · предложения для плана':' · уже подключённые категории');
+    showStep('screenshotForm','Как добавить условия?','manualDraft');
+  }
+  $('chooseOffer').onclick=()=>choose('offer'); $('chooseActive').onclick=()=>choose('active');
+  let discardResolver = null;
+  function askDiscard(){
+    return new Promise(resolve=>{
+      if(!dirty){resolve(true); return;}
+      const dialog=$('discardDialog');
+      discardResolver=resolve;
+      dialog.hidden=false;
+      $('discardStay').focus();
+    });
+  }
+  async function mayDiscard(){ return askDiscard(); }
+  if($('discardStay')) $('discardStay').onclick=()=>{ $('discardDialog').hidden=true; const r=discardResolver; discardResolver=null; r?.(false); };
+  if($('discardLeave')) $('discardLeave').onclick=()=>{ $('discardDialog').hidden=true; const r=discardResolver; discardResolver=null; r?.(true); };
+  if($('discardDialog')) $('discardDialog').addEventListener('keydown',e=>{ if(e.key==='Escape'){ e.preventDefault(); $('discardStay').click(); }});
+  $('changeDecision').onclick=async()=>{if(!(await mayDiscard()))return; dirty=false; clearShot(); showStep('decisionStep','Условия кэшбэка','bankId');};
+  $('cashbackShot').onchange=async()=>{
+    clearFileState(); const token=draftEpoch,file=$('cashbackShot').files[0]; if(!file) return clearShot();
+    dirty=true; $('shotPreview').textContent='Читаем снимок…';
+    try{if(file.size>4000000) throw new Error('Снимок больше 4 МБ'); const data=await readShot(file); if(token!==draftEpoch)return;
+      image=data; const img=node('img'); img.alt='Предпросмотр снимка'; img.src=image; $('shotPreview').replaceChildren(img); $('confirmCard').disabled=false;
+    }catch(e){if(token===draftEpoch){$('shotPreview').textContent='Выберите другой снимок'; fail(e,$('shotError'));}}
   };
-  $('screenshotForm').onsubmit = async event => {
-    event.preventDefault(); if ($('confirmCard').disabled) return; const token = ++draftEpoch;
-    try { target = chooseTarget(); if (!image) throw new Error('Выберите снимок или введите условия вручную.');
-      $('confirmCard').disabled = true; $('confirmCard').textContent = 'Распознаём…'; $('shotError').textContent = '';
-      const data = await post('cashback-screenshot', {...target, image}, 45000);
-      if (token === draftEpoch) startReview(data.rules, data.month, 'offer', data.slots, data.warnings);
-    } catch (e) { if (token === draftEpoch) fail(e, $('shotError')); }
-    finally { if (token === draftEpoch) { $('confirmCard').disabled = false; $('confirmCard').textContent = 'Прочитать снимок'; } }
+  function clearFileState(){++draftEpoch; image=''; $('confirmCard').disabled=true; $('confirmCard').textContent='Прочитать снимок'; $('shotError').textContent='';}
+  $('screenshotForm').onsubmit=async e=>{e.preventDefault(); if(!image || $('confirmCard').disabled)return; const token=++draftEpoch;
+    $('confirmCard').disabled=true; $('confirmCard').textContent='Распознаём…'; $('shotError').textContent='';
+    try{const data=await post('cashback-screenshot',{...target,image},45000); if(token===draftEpoch)startReview(data.rules,data.month,null,'shot');}
+    catch(err){if(token===draftEpoch)fail(err,$('shotError'));} finally{if(token===draftEpoch){$('confirmCard').disabled=false; $('confirmCard').textContent='Прочитать снимок';}}
   };
-  $('manualDraft').onclick = () => { try { target = chooseTarget(); startReview([{}], null, 'offer'); } catch (e) { fail(e,$('shotError')); } };
-  function labelled(parent, title, control, cls) { const label = node('label', title, cls); label.append(control); parent.append(label); return control; }
-  function input(parent, key, title, value, cls) { const field = node('input'); field.dataset.key = key; field.value = value ?? ''; labelled(parent, title, field, cls); return field; }
-  function row(rule) {
-    const box = node('fieldset'), legend = node('legend',rule.label || 'Новая категория'); box.append(legend);
-    const state = rule.selected === true ? 'выбрана' : rule.selected === false ? 'не выбрана' : 'неизвестно';
-    const source = rule.label ? `На снимке: ${state}.` : 'Введите строку так, как она показана в банке.';
-    box.append(node('p', source + (rule.uncertain && rule.label ? ' Распознано неуверенно — сверьте условия.' : ''), rule.uncertain && rule.label ? 'cb-warning' : 'cb-note'));
-    const grid = node('div', null, 'cb-fields'); box.append(grid);
-    const label = input(grid,'label','Название в банке',rule.label,'wide'); label.maxLength = 80;
-    const category = input(grid,'categoryId','Категория для расчёта (пусто — по названию)',rule.categoryId,'wide'); category.setAttribute('list','cbCategoryIds');
-    [['rateBps','Ставка, %'],['limitKopecks','Лимит, ₽'],['minAmountKopecks','Покупка от, ₽']].forEach(([key,title]) => { const field = input(grid,key,title,rule[key] == null ? '' : rule[key] / 100); field.inputMode = 'decimal'; });
-    const include = node('input'); include.type = 'checkbox'; include.dataset.key = 'include';
-    labelled(box, 'Подтверждаю эту строку',include,'cb-check');
-    const remove = node('button','Убрать строку'); remove.type = 'button'; remove.onclick = () => { box.remove(); $('addRule').focus(); }; box.append(remove);
-    box.dataset.selected = JSON.stringify(rule.selected ?? null); $('reviewRows').append(box); return label;
+  $('manualDraft').onclick=async()=>{if(!(await mayDiscard()))return; startReview([{}],suggestedMonth || monthAt(mode==='offer'?1:0),null,'manual');};
+  function labelled(parent,title,control,cls){const label=node('label',title,cls); label.append(control); parent.append(label); return control;}
+  function input(parent,key,title,value,cls){const field=node('input'); field.dataset.key=key; field.value=value??''; return labelled(parent,title,field,cls);}
+  function formatRateText(bps){ if(bps==null||bps==='') return null; return (Number(bps)/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%'; }
+  function syncMonthText(){
+    const value=$('reviewMonth').value;
+    const text=$('reviewMonthText');
+    if(!text) return;
+    text.textContent=value?periodName(value).replace(/\s*г\.?$/,'').replace(/^./,c=>c.toUpperCase()):'Выберите месяц';
+    text.classList.toggle('is-empty', !value);
   }
-  function updateMode() { const active = $('reviewMode').value === 'active'; $('reviewHint').textContent = active ? 'Отметьте только категории, которые вы уже подключили в приложении банка.' : 'Отметьте проверенные предложения. Они попадут в план, но не будут считаться подключёнными.'; $('saveReview').textContent = active ? 'Подтвердить подключение в банке' : 'Сохранить предложения'; }
-  $('reviewMode').onchange = () => { for (const box of $('reviewRows').querySelectorAll('[type=checkbox]')) box.checked = false; updateMode(); };
-  function startReview(rules, month, mode, slots, warnings = []) {
-    if (!Array.isArray(rules)) throw new Error('Сервер не вернул список условий.');
-    clearShot(); replay = null; $('screenshotForm').hidden = true; $('reviewForm').hidden = false; $('reviewRows').replaceChildren();
-    $('reviewContext').textContent = `${bankName(target.bankId)} · ${manual.find(c => c.cardId === target.cardId)?.name || 'Карта по банку'}`;
-    $('reviewMonth').value = month || monthAt(0); $('reviewMonth').disabled = fromPlan; month = $('reviewMonth').value;
-    $('reviewMode').value = mode; $('reviewMode').disabled = fromPlan; $('reviewSlots').value = slots || ''; $('reviewSlots').disabled = fromPlan && Boolean(slots);
-    $('reviewWarnings').textContent = [...(Array.isArray(warnings) ? warnings : []), ...(!month ? ['Месяц не указан — проверьте период.'] : [])].join(' ');
-    updateMode(); rules.forEach(row); $('saveReview').disabled = false; $('reviewContext').tabIndex = -1; $('reviewContext').focus();
+  function updateReviewFooter(){
+    const boxes=[...$('reviewRows').children];
+    let selected=0, needRate=false;
+    boxes.forEach(box=>{
+      const fields=Object.fromEntries([...box.querySelectorAll('[data-key]')].map(f=>[f.dataset.key,f]));
+      if(fields.include?.checked){ selected+=1; if(!(fields.rateBps?.value||'').trim()) needRate=true; }
+    });
+    if($('reviewCount')) $('reviewCount').textContent=`Выбрано: ${selected}`;
+    const needs=[];
+    if(!$('reviewMonth').value) needs.push('укажите месяц');
+    if(!selected) needs.push('отметьте категорию');
+    if(needRate) needs.push('укажите ставку');
+    if($('reviewNeed')) $('reviewNeed').textContent=needs.length?'Нужно: '+needs.join(', '):'';
+    $('saveReview').disabled=!!needs.length || busy;
   }
-  $('addRule').onclick = () => row({}).focus();
-  function hundredths(raw, fallback, name) {
-    const text = raw.trim(); if (!text && fallback !== undefined) return fallback;
-    if (!/^\d+(?:[.,]\d{1,2})?$/.test(text)) throw new Error(`Проверьте поле «${name}».`);
-    const [whole, part = ''] = text.split(/[.,]/), value = Number(whole)*100 + Number(part.padEnd(2,'0'));
-    if (!Number.isSafeInteger(value)) throw new Error(`Слишком большое значение: ${name}.`); return value;
-  }
-  const offerKey = (card, month) => JSON.stringify([deviceLogin, card, month]);
-  $('reviewForm').onsubmit = async event => {
-    event.preventDefault(); if (busy) return; const mode = $('reviewMode').value, rules = [];
-    try { for (const box of $('reviewRows').children) {
-      const fields = Object.fromEntries([...box.querySelectorAll('[data-key]')].map(f => [f.dataset.key,f])); if (!fields.include.checked) continue;
-      const label = fields.label.value.trim(); if (!label) throw new Error('Укажите название категории, как в банке.');
-      const rateBps = hundredths(fields.rateBps.value,undefined,'Ставка'); if (rateBps > 10000) throw new Error('Ставка не может превышать 100 %.');
-      rules.push({label, categoryId:fields.categoryId.value.trim() || label, rateBps, limitKopecks:hundredths(fields.limitKopecks.value,null,'Лимит'), minAmountKopecks:hundredths(fields.minAmountKopecks.value,1,'Минимальная покупка'), selected:true, uncertain:false});
+  function row(rule={}){
+    const box=node('fieldset','','review-row');
+    const head=node('div',null,'review-row-head');
+    const title=node('div',null,'review-row-title');
+    const name=node('strong', rule.label || categories[rule.categoryId] || 'Новая категория');
+    const meta=[]; const rate=formatRateText(rule.rateBps); if(rate) meta.push(rate);
+    if(rule.limitKopecks!=null) meta.push('лимит '+(rule.limitKopecks/100).toLocaleString('ru-RU')+' ₽');
+    if(!rate) meta.push('ставка не указана');
+    const summary=node('span', meta.join(' · '), 'review-row-meta');
+    title.append(name, summary);
+    const include=node('input'); include.type='checkbox'; include.dataset.key='include'; include.checked=rule.selected===true;
+    const includeLabel=node('label', mode==='active'?'Подключена':'Добавить в предложения', 'review-check');
+    includeLabel.prepend(include);
+    head.append(title, includeLabel); box.append(head);
+    if(rule.uncertain) box.append(node('p','Проверьте неуверенно распознанные поля.','cb-warning'));
+    const details=node('details',null,'review-details');
+    details.append(node('summary','Подробнее'));
+    const grid=node('div',null,'cb-fields'); details.append(grid);
+    const label=input(grid,'label','Название в банке',rule.label,'wide'); label.maxLength=80;
+    label.addEventListener('input',()=>{ name.textContent=label.value.trim()||'Новая категория'; updateReviewFooter(); });
+    const category=input(grid,'categoryId','Категория для расчёта',rule.categoryId||'','wide'); category.setAttribute('list','cbCategoryIds'); category.maxLength=80;
+    const rateField=input(grid,'rateBps','Ставка, %',rule.rateBps==null?'':rule.rateBps/100); rateField.inputMode='decimal';
+    if(rule.rateBps==null){ rateField.required=true; rateField.placeholder='Укажите ставку'; rateField.classList.add('needs-input'); }
+    rateField.addEventListener('input',()=>{
+      const formatted=formatRateText(rateField.value===''?null:Number(String(rateField.value).replace(',','.'))*100);
+      summary.textContent=[formatted||'ставка не указана', rule.limitKopecks!=null?('лимит '+(rule.limitKopecks/100).toLocaleString('ru-RU')+' ₽'):null].filter(Boolean).join(' · ');
+      updateReviewFooter();
+    });
+    const limit=input(grid,'limitKopecks','Лимит кэшбэка, ₽',rule.limitKopecks==null?'':rule.limitKopecks/100); limit.inputMode='decimal'; limit.placeholder='Не указан';
+    const minimum=input(grid,'minAmountKopecks','Минимальная сумма покупки, ₽',rule.minAmountKopecks==null?'':rule.minAmountKopecks/100); minimum.inputMode='decimal'; minimum.placeholder='1';
+    if(rule.uncertain){
+      const warn=node('p','Значение распознано неуверенно — сверьте со снимком.','cb-warning');
+      rateField.parentElement.append(warn.cloneNode(true));
     }
-    if (!rules.length) throw new Error('Отметьте хотя бы одну проверенную строку.');
-    const body = {...target, month:$('reviewMonth').value, mode, slots:Number($('reviewSlots').value), rules};
-    const signature = JSON.stringify(body); if (replay?.signature !== signature) replay = {signature, key:newKey()};
-    busy = true; $('saveReview').disabled = true; $('shotError').textContent = 'Сохраняем…'; $('reviewForm').inert = true;
-    const response = await post('cashback-confirm', {...body,requestId:replay.key});
-    if (mode === 'offer') { const key = offerKey(response?.cardId || target.cardId,body.month), combined = new Map((sessionOffers.get(key)?.rules || []).map(r => [r.label,r])); for (const r of rules) combined.set(r.label,r); sessionOffers.set(key,{slots:body.slots,rules:[...combined.values()]}); }
-    busy = false; closeReview(); invalidatePlan(); toast(mode === 'offer' ? 'Предложения сохранены для планирования' : 'Подключённые категории сохранены'); await load();
-    } catch(e) { fail(e,$('shotError')); } finally { busy = false; $('saveReview').disabled = false; $('reviewForm').inert = false; }
+    box.append(details);
+    include.addEventListener('change',updateReviewFooter);
+    box.append(action('Убрать строку',()=>{dirty=true; box.remove(); updateReviewFooter(); $('addRule').focus();}));
+    $('reviewRows').append(box); return label;
+  }
+  function startReview(rules,month,slots,kind){
+    if(!Array.isArray(rules))throw new Error('Сервер не вернул список условий.');
+    clearShot(); dirty=kind==='shot' || !month; source=kind; replay=null; $('reviewRows').replaceChildren();
+    const active=mode==='active';
+    const cardLabel=$('cashbackCard').selectedOptions[0]?.textContent || 'Карта';
+    $('reviewContext').textContent=bankName(target.bankId)+' · '+cardLabel;
+    $('reviewMonth').value=month || ''; $('reviewMonth').disabled=kind==='plan'; syncMonthText();
+    $('reviewSlots').value=slots??''; $('reviewSlots').max=128; $('reviewSlots').disabled=kind==='plan' && slots!=null;
+    const slotsWrap=$('reviewSlotsLabel'); if(slotsWrap) slotsWrap.hidden=active;
+    if($('reviewWarnings')){ $('reviewWarnings').hidden=true; $('reviewWarnings').textContent=''; }
+    $('reviewHint').textContent=active?'Отметьте категории, которые уже подключены в банке.':'Отметьте предложения для плана. Без числа мест сравнение этой карты недоступно.';
+    $('saveReview').textContent='Сохранить категории';
+    rules.forEach(row);
+    updateReviewFooter();
+    showStep('reviewForm','Проверьте категории', month?'reviewContext':'reviewMonth');
+  }
+  $('reviewForm').oninput=()=>{dirty=true; updateReviewFooter();};
+  $('reviewMonth').addEventListener('change',()=>{dirty=true; syncMonthText(); updateReviewFooter();});
+  $('addRule').onclick=()=>{dirty=true;row().focus(); updateReviewFooter();};
+  function hundredths(raw,fallback,name){const text=raw.trim(); if(!text && fallback!==undefined)return fallback; if(!/^\d+(?:[.,]\d{1,2})?$/.test(text))throw new Error(`Проверьте поле «${name}».`); const [whole,part='']=text.split(/[.,]/),value=Number(whole)*100+Number(part.padEnd(2,'0')); if(!Number.isSafeInteger(value))throw new Error(`Слишком большое значение: ${name}.`); return value;}
+  $('reviewForm').onsubmit=async e=>{
+    e.preventDefault(); if(busy)return; updateReviewFooter(); if($('saveReview').disabled) return;
+    try{const rules=[]; for(const box of $('reviewRows').children){const fields=Object.fromEntries([...box.querySelectorAll('[data-key]')].map(f=>[f.dataset.key,f])); if(!fields.include.checked)continue;
+      const label=fields.label.value.trim(); if(!label)throw new Error('Укажите название категории, как в банке.'); const rateBps=hundredths(fields.rateBps.value,undefined,'Ставка'); if(rateBps>10000)throw new Error('Ставка не может превышать 100 %.');
+      rules.push({label,categoryId:fields.categoryId.value.trim() || label,rateBps,limitKopecks:hundredths(fields.limitKopecks.value,null,'Лимит'),minAmountKopecks:hundredths(fields.minAmountKopecks.value,1,'Минимальная покупка'),selected:true,uncertain:false});
+    }
+    if(!rules.length)throw new Error('Отметьте хотя бы одну проверенную строку.');
+    const body={...target,month:$('reviewMonth').value,mode,slots:$('reviewSlots').value===''?null:Number($('reviewSlots').value),rules};
+    const signature=JSON.stringify(body); if(replay?.signature!==signature)replay={signature,key:newKey()};
+    busy=true; $('saveReview').disabled=true; $('saveReview').textContent='Сохраняем…'; $('reviewForm').inert=true; $('shotError').textContent='';
+    const response=await post('cashback-confirm',{...body,requestId:replay.key});
+    if(mode==='offer')sessionOffers.set(offerKey(response.cardId,response.month),{rules:response.rules,slots:response.slots});
+    walletPreferredCard=response.cardId || target.cardId || walletPreferredCard;
+    const returnToPlan=!!suggestedMonth;
+    await load(); invalidatePlan(); busy=false; dirty=false; closeReview(true);
+    if(!returnToPlan && typeof walletRoute==='function') walletRoute('cards', true);
+    toast(mode==='offer'?'Предложения сохранены для плана':'Категории сохранены');
+    }catch(err){fail(err,$('shotError')||$('reviewNeed'));}finally{busy=false; $('saveReview').disabled=false; $('saveReview').textContent='Сохранить категории'; $('reviewForm').inert=false; updateReviewFooter();}
   };
-  function closeReview() { if (busy) return; clearShot(); review.hidden = true; $('reviewRows').replaceChildren(); if (fromPlan) { planner.hidden = false; $('calculatePlan').focus(); } else $('addCashbackBtn').focus(); fromPlan = false; }
-  function closePlanner() { invalidatePlan(); planner.hidden = true; $('openPlan').focus(); }
-  $('closeCatalog').onclick = closeReview; $('closePlan').onclick = closePlanner;
-  for (const [dialog, close] of [[review,closeReview],[planner,closePlanner]]) {
-    dialog.onclick = e => { if (e.target === dialog) close(); };
-    dialog.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } if (e.key !== 'Tab') return;
-      const items = [...dialog.querySelectorAll('button,input,select')].filter(x => !x.disabled && x.getClientRects().length && !x.closest('[inert]'));
-      if (!items.length) return; if (e.shiftKey && document.activeElement === items[0]) { e.preventDefault(); items.at(-1).focus(); } else if (!e.shiftKey && document.activeElement === items.at(-1)) { e.preventDefault(); items[0].focus(); }
-    };
+  async function closeReview(force){
+    if(busy) return false;
+    if(!force && !(await mayDiscard())) return false;
+    dirty=false; clearShot(); review.hidden=true; $('reviewRows').replaceChildren();
+    if(suggestedMonth){planner.hidden=false; (origin?.isConnected?origin:$('calculatePlan')).focus();}
+    else (origin||$('addCashbackBtn')).focus();
+    suggestedMonth=null; return true;
   }
-  const list = node('datalist'); list.id = 'cbCategoryIds'; document.body.append(list);
-  function syncCategories() { list.replaceChildren(...Object.entries(categories).map(([id,name]) => new Option(name,id))); }
-  document.addEventListener('wallet-updated', () => { syncCategories(); invalidatePlan(); }); syncCategories();
-  function spendRow() { const wrap = node('div',null,'cb-fields'); const cat = input(wrap,'categoryId','Категория','',''); cat.setAttribute('list',list.id); const amount = input(wrap,'amount','Траты, ₽',''); amount.inputMode = 'decimal'; $('spendRows').append(wrap); return cat; }
-  $('openPlan').onclick = () => { invalidatePlan(); planner.hidden = false; $('planMonth').value = monthAt(1); $('spendingMonth').value = monthAt(0); $('spendingSource').value = 'history'; $('spendingInputs').hidden = true; $('spendingPeriod').hidden = false;
-    const rows = node('div'); rows.id = 'spendRows'; const add = node('button','Добавить категорию трат'); add.type = 'button'; add.onclick = () => spendRow().focus(); $('spendingInputs').replaceChildren(rows,add); spendRow(); $('planMonth').focus(); };
-  $('spendingSource').onchange = () => { const manualInput = $('spendingSource').value === 'manual'; $('spendingInputs').hidden = !manualInput; $('spendingPeriod').hidden = manualInput; invalidatePlan(); };
-  $('planForm').oninput = invalidatePlan;
-  function activation(choice, month, data) {
-    const savedOffer = sessionOffers.get(offerKey(choice.cardId,month));
-    const details = data.activation?.find?.(x => x.cardId === choice.cardId) || savedOffer;
-    const rows = choice.labels.map(label => details?.rules?.find(r => r.label === label) || {label,uncertain:true});
-    fromPlan = true; target = {bankId:choice.bankId,cardId:choice.cardId}; planner.hidden = true; review.hidden = false;
-    startReview(rows,month,'active',details?.slots,rows.some(r => r.rateBps == null) ? ['Сверьте ставку, лимит и минимальную покупку с банком.'] : []);
+  function closePlanner(){
+    if(planDirty && !window.confirm('Закрыть план? Введённые расходы не сохранятся.'))return false;
+    planDirty=false; invalidatePlan(); planner.hidden=true;
+    if(planOrigin?.isConnected && !$('hero')?.hidden) planOrigin.focus();
+    else if(typeof walletRoute==='function') walletRoute('home', true);
+    else ($('openPlan')||planOrigin)?.focus();
+    return true;
   }
-  function showPlan(data, month) {
-    const host = $('planResult'); host.replaceChildren(node('h3','Прогноз на '+month));
-    host.append(node('p',`Сейчас: ${money(data.baseKopecks)}. По плану: ${money(data.projectedKopecks)}. Разница: ${money(data.gainKopecks)}.`));
-    for (const text of data.warnings || []) host.append(node('p',text,'cb-warning'));
-    if (!data.choices.length) host.append(node('p','Дополнительных категорий для подключения нет.','cb-note'));
-    else host.append(node('p','Сначала выберите категории в банке. После этого подтвердите выбор здесь.','cb-note'));
-    for (const choice of data.choices) { const group = node('article'); group.append(node('h3',bankName(choice.bankId))); const labels = node('ul'); choice.labels.forEach(l => labels.append(node('li',l))); group.append(labels); const activate = node('button','Подтвердить выбор в этом банке'); activate.type = 'button'; activate.onclick = () => activation(choice,month,data); group.append(activate); host.append(group); }
+  $('closeCatalog').onclick=()=>closeReview(); $('closePlan').onclick=closePlanner;
+  window.walletCashbackBack=()=>{if(!review.hidden){closeReview();return true;}const discard=$('discardDialog');if(discard&&!discard.hidden){$('discardStay').click();return true;}if(!planner.hidden){closePlanner();return true;}return false;};
+  window.addEventListener('beforeunload',e=>{if(dirty || planDirty){e.preventDefault(); e.returnValue='';}});
+  for(const [dialog,close] of [[review,closeReview],[planner,closePlanner]]){dialog.onclick=e=>{if(e.target===dialog)close();}; dialog.onkeydown=e=>{
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;} if(e.key!=='Tab')return;
+    const items=[...dialog.querySelectorAll('button,input,select')].filter(x=>!x.disabled && x.getClientRects().length && !x.closest('[inert]'));
+    if(!items.length)return; if(e.shiftKey && document.activeElement===items[0]){e.preventDefault();items.at(-1).focus();}else if(!e.shiftKey && document.activeElement===items.at(-1)){e.preventDefault();items[0].focus();}
+  };}
+  const list=node('datalist'); list.id='cbCategoryIds'; document.body.append(list);
+  function syncCategories(){list.replaceChildren(...Object.entries(categories).map(([id,name])=>new Option(name,id)));}
+  document.addEventListener('wallet-updated',()=>{syncCategories(); invalidatePlan();}); syncCategories();
+  function spendRow(){const wrap=node('div',null,'cb-fields'),cat=input(wrap,'categoryId','Категория покупки','','');cat.setAttribute('list',list.id); const amount=input(wrap,'amount','Сумма, ₽','');amount.inputMode='decimal';wrap.append(action('Убрать покупку',()=>{wrap.remove();planDirty=true;invalidatePlan();$('addSpend').focus();})); $('spendRows').append(wrap);return cat;}
+  function switchSource(){const manualInput=$('spendingSource').value==='manual';$('spendingInputs').hidden=!manualInput; $('spendingPeriod').hidden=manualInput; $('spendingMonth').disabled=manualInput; invalidatePlan();}
+  $('openPlan').onclick=e=>{planOrigin=e.currentTarget;planDirty=false;invalidatePlan(); planner.hidden=false; $('planMonth').value=monthAt(1); $('spendingMonth').value=monthAt(0); $('spendingSource').value='history';switchSource();
+    const rows=node('div');rows.id='spendRows';const add=action('Добавить покупку',()=>spendRow().focus());add.id='addSpend'; $('spendingInputs').replaceChildren(node('p','Одна строка — один чек. Для нескольких покупок одной категории добавьте несколько строк.','cb-note'),rows,add);spendRow(); planner.querySelector('.dialog-card').scrollTop=0; $('planMonth').focus();};
+  $('spendingSource').onchange=switchSource;
+  $('planForm').oninput=e=>{if($('spendingInputs').contains(e.target))planDirty=true;invalidatePlan();};
+  for(const [id,delta] of [['planCurrent',0],['planNext',1]])$(id).onclick=()=>{$('planMonth').value=monthAt(delta);invalidatePlan();};
+  function activation(choice,month,trigger){const offer=sessionOffers.get(offerKey(choice.cardId,month)); origin=trigger; suggestedMonth=month; mode='active';target={bankId:choice.bankId,cardId:choice.cardId}; planner.hidden=true;review.hidden=false;
+    startReview(choice.labels.map(label=>offer?.rules.find(r=>r.label===label) || {label}),month,offer?.slots,'plan');}
+  function showPlan(data,body){const host=$('planResult'),month=body.month,warnings=data.warnings||[];
+    const title=node('h3','Прогноз · '+periodName(month)); title.tabIndex=-1; host.replaceChildren(title,node('p','Источник: '+(body.spending?'Ручной ввод · покупок: '+body.spending.length:'История покупок · '+periodName(body.spendingMonth)),'cb-note'));
+    const noSpend=warnings.some(w=>w.startsWith('Нет расходов')),noTerms=warnings.some(w=>w.startsWith('Нет подтверждённых условий'));
+    if(!noSpend && !noTerms){const forecast=$('planForecast'); if(forecast && data.projectedKopecks!=null){forecast.hidden=false; forecast.textContent='По плану '+money(data.projectedKopecks);} const metrics=node('dl');for(const [caption,value] of [['Сейчас',data.baseKopecks],['По плану',data.projectedKopecks],['Разница',data.gainKopecks]]){const v=node('dd',money(value));v.dataset.kopecks=value;metrics.append(node('dt',caption),v);}host.append(metrics);}
+    if(warnings.some(w=>w.includes('Перебор ограничен')))host.append(node('strong','Приблизительный план'));
+    if(!data.choices.length && !noSpend && !noTerms)host.append(node('p','Дополнительных категорий с известным приростом нет.'));
+    for(const choice of data.choices){const group=node('article'),offer=sessionOffers.get(offerKey(choice.cardId,month));group.append(node('h3',bankName(choice.bankId)),node('p',`Для плана: ${choice.labels.length} мест. Всего у карты: ${offer?.slots??'уточните в банке'}.`));const names=node('ul');choice.labels.forEach(name=>names.append(node('li',name)));group.append(names,node('p','Сначала подключите эти категории в приложении банка.','cb-note'),action('Я выбрал это в банке',e=>activation(choice,month,e.currentTarget)));host.append(group);}
+    for(const warning of warnings)host.append(node('p',warning,'cb-warning'));
+    if(noSpend)host.append(action('Ввести расходы',()=>{$('spendingSource').value='manual';switchSource();$('spendRows').querySelector('input')?.focus();}));
+    host.append(action('Добавить предложения банка',e=>openDecision(e.currentTarget,month)));title.focus();
   }
-  $('planForm').onsubmit = async e => {
-    e.preventDefault(); if ($('calculatePlan').disabled) return; invalidatePlan(); const token = planEpoch;
-    try { const body = {month:$('planMonth').value,spendingMonth:$('spendingMonth').value};
-      if ($('spendingSource').value === 'manual') { body.spending = []; for (const r of $('spendRows').children) { const [cat,amt] = r.querySelectorAll('input'); if (!cat.value.trim() && !amt.value.trim()) continue;
-        if (!cat.value.trim()) throw new Error('Введите категорию трат.'); const amountKopecks = hundredths(amt.value,undefined,'Траты'); if (!amountKopecks) throw new Error('Сумма трат должна быть больше нуля.'); body.spending.push({categoryId:cat.value.trim(),amountKopecks}); }
-        if (!body.spending.length) throw new Error('Введите хотя бы одну сумму трат.'); }
-      $('calculatePlan').disabled = true; $('planResult').textContent = 'Сравниваем предложения банков…'; const result = await post('cashback-plan',body,45000); if (token === planEpoch) showPlan(result,body.month);
-    } catch (error) { if (token === planEpoch) { $('planResult').replaceChildren(); fail(error,$('planError')); } } finally { if (token === planEpoch) $('calculatePlan').disabled = false; }
+  $('planForm').onsubmit=async e=>{e.preventDefault(); if($('calculatePlan').disabled)return;invalidatePlan();const token=planEpoch;
+    try{const body={month:$('planMonth').value,spendingMonth:$('spendingMonth').value || monthAt(0)};
+      if($('spendingSource').value==='manual'){body.spending=[];for(const r of $('spendRows').children){const [cat,amt]=r.querySelectorAll('input');if(!cat.value.trim() && !amt.value.trim())continue;
+        if(!cat.value.trim())throw new Error('Введите категорию покупки.');const amountKopecks=hundredths(amt.value,undefined,'Сумма');if(!amountKopecks)throw new Error('Сумма должна быть больше нуля.');const value=cat.value.trim(),cid=Object.keys(categories).find(k=>categories[k].toLowerCase()===value.toLowerCase()) || value;body.spending.push({categoryId:cid,amountKopecks});}
+        if(!body.spending.length)throw new Error('Введите хотя бы одну покупку.');}
+      $('calculatePlan').disabled=true; $('planResult').textContent='Сравниваем предложения банков…';const data=await post('cashback-plan',body,45000); if(token===planEpoch)showPlan(data,body);
+    }catch(err){if(token===planEpoch){$('planResult').replaceChildren();fail(err,$('planError'));}}finally{if(token===planEpoch)$('calculatePlan').disabled=false;}
   };
-  new ResizeObserver(() => { if ($('cardCarousel').clientWidth) { carouselPos.slotPx = carouselSlot(); applyCarouselTransforms(); } }).observe($('cardCarousel'));
+  new ResizeObserver(()=>{if($('cardCarousel').clientWidth){carouselPos.slotPx=carouselSlot();applyCarouselTransforms();}}).observe($('cardCarousel'));
 })();

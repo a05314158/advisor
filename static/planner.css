@@ -1,0 +1,25 @@
+body:has(.cashback-dialog:not([hidden])) {overflow:hidden}
+.cashback-dialog .dialog-card {overflow:auto; overscroll-behavior:contain; scroll-padding:76px 0 20px; min-width:0; overflow-wrap:anywhere;}
+.cashback-dialog .dialog-head {position:sticky; top:0; z-index:2; background:var(--paper); padding:8px 0;}
+.cashback-dialog .shot-form > h3,.cashback-dialog .shot-form > p {margin:6px 0;}
+.cashback-dialog .cb-months {display:flex; flex-wrap:wrap; gap:8px;}
+.cashback-dialog button,.cashback-dialog .shot-form select,.cashback-dialog .shot-form input:not([type=checkbox]) {min-height:44px;}
+.cashback-dialog .shot-form input:focus-visible,.cashback-dialog button:focus-visible {outline:3px solid var(--ink);outline-offset:2px;}
+.cashback-dialog .cb-check {min-height:44px;}
+.cashback-dialog [data-key=include] {order:-1;}
+.cashback-dialog #spendRows > div {margin-block:8px; border-bottom:1px solid var(--line); padding-bottom:10px;}
+.cashback-dialog #planResult dl {display:grid;grid-template-columns:1fr auto;gap:8px;margin:12px 0;}
+.cashback-dialog #planResult dd {margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
+.cashback-dialog #planResult dt:last-of-type,.cashback-dialog #planResult dd:last-of-type {border-top:1px solid var(--line);padding-top:8px;}
+.cashback-dialog #planResult article {padding-bottom:12px;}
+@media (max-width:600px) {
+  .dialog.cashback-dialog {inset:0;height:100dvh; padding:0;align-items:stretch;justify-items:stretch;}
+  .dialog.cashback-dialog .dialog-card {box-sizing:border-box;display:block;width:100%;max-width:none;height:100%;max-height:none; margin:0;border:0;border-radius:0; padding:max(8px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:var(--paper);}
+  .cashback-dialog .shot-form input,.cashback-dialog .shot-form select {font-size:16px;}
+}
+@media (max-width:359px) {.cashback-dialog .cb-fields {grid-template-columns:minmax(0,1fr);}}
+.cashback-dialog .review-month input[type=month] { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; font-size: 16px; }
+.cashback-dialog .review-footer .confirm { width: 100%; }
+.cashback-dialog .cb-fields { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.cashback-dialog .cb-fields label { min-width: 0; }
+.cashback-dialog .cb-fields input { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }

@@ -9,18 +9,22 @@ POCKET = 'M43 72 Q45 51 68 51 Q192 43 322 57 Q346 59 347 82 L343 210 Q342 251 30
 
 class WalletPage(unittest.TestCase):
     def test_page_has_one_svg(self):
-        self.assertEqual(PAGE.count('viewBox="0 0 390 330"'), 1)
-        self.assertEqual(PAGE.count('id="pocket"'), 1)
+        self.assertNotIn('viewBox="0 0 390 330"', PAGE)
+        self.assertNotIn('id="pocket"', PAGE)
+        self.assertIn('id="homePreview"', PAGE)
 
     def test_old_drawn_wallet_is_gone(self):
         self.assertNotIn('650 840', PAGE)
         self.assertNotIn('leatherBody', PAGE)
         self.assertNotIn('pocket.webp', PAGE)
         self.assertNotIn('id="lining"', PAGE)
+        self.assertNotIn('wallet-nav', PAGE)
 
-    def test_leather_file_is_the_wallet(self):
-        self.assertIn(f'<path id="pocket" d="{POCKET}"/>', PAGE)
-        self.assertLess(PAGE.index('id="pocketCards"'), PAGE.index('class="front"'))
+    def test_home_asks_before_the_cards(self):
+        self.assertLess(PAGE.index('Какой картой выгоднее заплатить?'), PAGE.index('id="homePreview"'))
+        self.assertLess(PAGE.index('id="openBuy"'), PAGE.index('id="openCards"'))
+        self.assertIn('id="openPlan"', PAGE)
+        self.assertIn('id="accountPanel"', PAGE)
 
     def test_hero_tags_balance(self):
         hero = PAGE.split('<section class="hero', 1)[1].split('</section>', 1)[0]
@@ -28,13 +32,26 @@ class WalletPage(unittest.TestCase):
         self.assertEqual(hero.count('<svg'), hero.count('</svg>'))
 
     def test_empty_line_is_inside_the_leather_wallet(self):
-        wallet = PAGE.split('<div class="wallet">', 1)[1].split('</div>', 1)[0]
-        self.assertIn('id="pocketEmpty"', wallet)
-        self.assertIn('id="pocket"', wallet)
+        self.assertIn('id="homeSummary"', PAGE)
+        self.assertIn('id="emptyAdd"', PAGE)
+        self.assertIn('Пока нет карт', PAGE)
 
-    def test_refresh_and_logout_are_gone(self):
-        self.assertNotIn('id="refresh"', PAGE)
-        self.assertNotIn('id="logout"', PAGE)
+    def test_settings_controls_real_session_and_theme(self):
+        self.assertIn('id="logout"', PAGE)
+        self.assertIn('id="settingsTheme"', PAGE)
+        self.assertIn('id="passwordToggle"', PAGE)
+
+    def test_wallet_has_visible_routes_and_bank_search(self):
+        self.assertNotIn('aria-label="Разделы кошелька"', PAGE)
+        for key in ('historyPanel', 'buyPanel', 'cardsPanel', 'accountPanel'):
+            self.assertIn(f'id="{key}"', PAGE)
+        for key in ('historyPanel', 'bankSearch', 'addSource', 'deleteDialog'):
+            self.assertIn(f'id="{key}"', PAGE)
+        self.assertNotIn("String(index+1).padStart(4,'0')", PAGE)
+        self.assertIn('Какой картой выгоднее заплатить?', PAGE)
+        self.assertIn('>Сравнить карты<', PAGE)
+        self.assertIn('src="/static/wallet-shell.js"', PAGE)
+        self.assertIn('href="/static/wallet-shell.css"', PAGE)
 
     def test_gallery_pick_reads_bytes(self):
         self.assertIn('accept="image/*"', PAGE)
@@ -46,8 +63,8 @@ class WalletPage(unittest.TestCase):
         self.assertIn('id="welcomeScreen"', PAGE)
 
     def test_home_is_purchase_and_cards(self):
-        self.assertIn('aria-label="Тема"', PAGE)
-        self.assertIn('aria-label="Настройки"', PAGE)
+        self.assertIn('id="settingsTheme"', PAGE)
+        self.assertIn('aria-label="Аккаунт"', PAGE)
         self.assertNotIn('>Тёмная<', PAGE)
         self.assertIn('id="openBuy"', PAGE)
         self.assertIn('id="openCards"', PAGE)
@@ -68,7 +85,10 @@ class WalletPage(unittest.TestCase):
         self.assertIn('ArrowRight', PAGE)
         self.assertIn('cubicBezier', PAGE)
         self.assertIn('prefers-reduced-motion: reduce', PAGE)
-        self.assertIn('carouselPoses=[[0,0,0,1,0,0],[1,1,.10,.77,4,16]', PAGE)
+        self.assertIn('carouselPoses=[[0,0,0,1,0,0],[1,.78,.18,.90,10,0]', PAGE)
+        self.assertIn('id="demoBar"', PAGE)
+        self.assertIn('demo=cards', PAGE)
+        self.assertIn('из ${cards.length}', PAGE)
 
     def test_card_arc_keeps_empty_state_and_bank_colors(self):
         self.assertIn('Кошелёк пуст.', PAGE)

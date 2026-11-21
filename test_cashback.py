@@ -19,14 +19,17 @@ class API:
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
         self.loop.run_until_complete(self.client.__aenter__())
 
-    def _request(self, method, path, body):
-        return self.loop.run_until_complete(self.client.request(method, path, json=body))
+    def _request(self, method, path, body, headers=None):
+        return self.loop.run_until_complete(self.client.request(method, path, json=body, headers=headers))
 
     def get(self, path):
         return self._request('GET', path, None)
 
-    def post(self, path, json=None):
-        return self._request('POST', path, json)
+    def post(self, path, json=None, headers=None):
+        return self._request('POST', path, json, headers)
+
+    def put(self, path, json=None, headers=None):
+        return self._request('PUT', path, json, headers)
 
     def close(self):
         self.loop.run_until_complete(self.client.__aexit__(None, None, None))
@@ -115,10 +118,99 @@ class Cashback(unittest.TestCase):
                 bad = other.post('/api/me/cashback-screenshot',json=dict(bankId='sber',cardId=card,image=IMAGE))
                 self.assertEqual(bad.status_code,404); model.assert_not_called()
             self.assertEqual(other.post('/api/me/cashback-confirm',json=dict(bankId='sber',cardId=card,mode='active',month=MONTH,slots=1,requestId='x',rules=[rule()])).status_code,404)
-        payload=dict(chosenCardId=card,categoryId='Такси',amountKopecks=10000,requestId='record-123')
+        payload=dict(chosenCardId=card,categoryId='Такси',amountKopecks=10000,requestId='purchase-record-12345')
         for _ in range(2):
             self.assertEqual(self.client.post('/api/me/purchases',json=payload).status_code,201)
         self.assertEqual(self.client.get('/api/me/stats').json()['count'],1)
+
+    def test_rejects_invalid_header_idempotency_key(self):
+        response = self.client.post('/api/me/purchases', headers={'Idempotency-Key': 'short'}, json={
+            'chosenCardId': 'missing', 'categoryId': 'Такси', 'amountKopecks': 10000,
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()['code'], 'invalid_idempotency_key')
+
+    def test_purchase_rejects_card_below_category_threshold(self):
+        card = self.client.post('/api/me/manual-cards', json={
+            'name': 'Пороговая карта', 'rules': [{'categoryId': 'cafe', 'rateBps': 800, 'minAmountKopecks': 10000}],
+        }).json()['cardId']
+        response = self.client.post('/api/me/purchases', json={
+            'chosenCardId': card, 'categoryId': 'cafe', 'amountKopecks': 9999,
+        })
+        self.assertEqual(response.status_code, 422)
+
+    def test_usual_card_must_belong_to_current_session_and_can_be_cleared(self):
+        response = self.client.put('/api/me/usual-card', json={'cardId': 'missing'})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client.put('/api/me/usual-card', json={'cardId': ''}).status_code, 204)
+
+    def test_purchase_replay_uses_header_or_legacy_body_and_is_private(self):
+        self.client.put('/api/me/cards/A')
+        base = dict(chosenCardId='A', categoryId='supermarkets', amountKopecks=10000)
+        with API(self.app) as other:
+            self.login(other, 'other'); other.put('/api/me/cards/A')
+            for fields, headers in [({'requestId': 'short'}, {}), ({'requestId': None}, {'Idempotency-Key': 'header-key-123456'})]:
+                for client in [self.client, other]:
+                    for _ in range(2):
+                        response = client.post('/api/me/purchases', json={**base, **fields}, headers=headers)
+                        self.assertEqual(response.status_code, 201, response.text)
+                    self.assertEqual(client.post('/api/me/purchases', json={**base, **fields, 'amountKopecks': 20000}, headers=headers).status_code, 409)
+            self.assertEqual(other.get('/api/me/stats').json()['count'], 2)
+        self.assertEqual(self.client.get('/api/me/stats').json()['count'], 2)
+        for invalid in [[], 7, '']:
+            self.assertEqual(self.client.post('/api/me/purchases', json={**base, 'requestId': invalid}).status_code, 422)
+
+    def test_unknown_category_cannot_use_all_purchases(self):
+        card = self.confirm(rules=[rule('Все покупки', 'all')]).json()['cardId']
+        bad = self.client.post('/api/me/purchases', json=dict(chosenCardId=card, categoryId='Несуществующая', amountKopecks=1000))
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(self.client.get('/api/me/stats').json()['count'], 0)
+
+    def test_usual_cleanup_and_logout(self):
+        self.client.put('/api/me/cards/A')
+        manual = self.confirm().json()['cardId']
+        for path, card in [('cards', 'A'), ('manual-cards', manual)]:
+            self.assertEqual(self.client.put('/api/me/usual-card', json={'cardId': card}).status_code, 204)
+            self.assertEqual(self.client._request('DELETE', f'/api/me/{path}/{card}', None).status_code, 204)
+            self.assertIsNone(self.client.get('/api/me/stats').json()['usualCardId'])
+        self.assertEqual(self.client.post('/api/auth/logout').status_code, 204)
+        self.assertFalse(self.client.get('/api/auth/me').json()['authenticated'])
+        self.assertEqual(self.client.get('/api/me/stats').status_code, 401)
+
+    def test_monthly_provenance_and_slot_cap(self):
+        card = self.confirm(slots=1, rules=[rule('Кино', 'Кино')]).json()['cardId']
+        self.assertEqual(self.confirm('overflow', [rule('Афиша', 'Афиша')], slots=1, cardId=card).status_code, 422)
+        self.assertEqual(self.confirm('both', [rule('Афиша', 'Афиша', 800)], slots=2, cardId=card).status_code, 200)
+        self.assertEqual(self.confirm('options', [rule('Кино', 'Кино'), rule('Афиша', 'Афиша')], slots=1, mode='offer', cardId=card).status_code, 200)
+        for cid, rate in [('Афиша', 800), ('Кино', 500)]:
+            item, = self.client.post('/api/recommendations', json=dict(categoryId=cid, amountKopecks=10000, scope='mine')).json()['allMatches']
+            self.assertEqual((item['rateBps'], item['bankName'], item['source'], item['updatedOn']), (rate, 'СберБанк', 'confirmed', '2026-11-20'))
+
+    def test_catalog_suggestion_not_a_wallet_match(self):
+        body = dict(categoryId='supermarkets', amountKopecks=250000, scope='mine')
+        result = self.client.post('/api/recommendations', json=body).json()
+        self.assertEqual((result['top3'], result['allMatches'], result['catalogSuggestion']['cardId']), ([], [], 'B'))
+        self.client.put('/api/me/cards/A')
+        self.assertNotIn('catalogSuggestion', self.client.post('/api/recommendations', json=body).json())
+
+    def test_concurrent_partial_uploads_preserve_both_rows(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        gate = Barrier(2)
+        cookie = self.client.client.cookies.get('advisor_session')
+        def upload(label):
+            with API(self.app) as peer:
+                peer.client.cookies.set('advisor_session', cookie)
+                gate.wait(timeout=5)
+                return peer.post('/api/me/cashback-confirm', json=dict(
+                    bankId='sber', month=MONTH, mode='active', slots=2, requestId=label,
+                    rules=[rule(label,label)])).json()['cardId']
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            ids = list(workers.map(upload, ['Такси', 'Метро']))
+        self.assertEqual(ids[0], ids[1])
+        with connect(self.path) as db:
+            payload, = db.execute('SELECT rules_json FROM cashback_sets').fetchone()
+        self.assertEqual({r['label'] for r in json.loads(payload)}, {'Такси', 'Метро'})
 
     def test_ambiguous_bank_needs_card_id(self):
         for _ in range(2):
